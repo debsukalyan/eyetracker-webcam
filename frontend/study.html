@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <!-- WebGazer's secure-origin check accepts 'localhost' but not '127.0.0.1'.
+       Redirect first so the camera can start. Runs before any other script. -->
+  <script>
+    if (location.hostname === '127.0.0.1') {
+      location.replace(location.protocol + '//localhost:' + location.port + location.pathname + location.search);
+    }
+  </script>
+  <title>Attention Study</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+
+<!-- 0. Loading / token -->
+<div class="stage active" id="load-stage">
+  <div class="panel">
+    <h1>Loading study…</h1>
+    <p class="muted" id="load-msg">Validating your participation link.</p>
+  </div>
+</div>
+
+<!-- 1. Consent (PRD section 4.2 / 14) -->
+<div class="stage" id="consent-stage">
+  <div class="panel">
+    <h1 id="study-title">Welcome</h1>
+    <p class="muted">Please read and accept the consent below. <strong>Your camera will not turn on until you accept.</strong></p>
+    <div class="consent-box" id="consent-text"></div>
+    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;color:var(--text)">
+      <input type="checkbox" id="consent-check" style="width:auto" />
+      I have read and consent to webcam-based gaze estimation for this study.
+    </label>
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn lg" id="consent-accept" disabled>Accept &amp; continue</button>
+      <button class="btn secondary lg" id="consent-decline">Decline</button>
+    </div>
+  </div>
+</div>
+
+<!-- 2. Device / browser check (PRD section 5) -->
+<div class="stage" id="device-stage">
+  <div class="panel">
+    <h1>Device check</h1>
+    <p class="muted">We are checking your setup meets the minimum requirements.</p>
+    <ul class="check-list" id="device-checks"></ul>
+    <div class="banner warn" id="device-warn" style="display:none"></div>
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn lg" id="device-continue" disabled>Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- 3. Face positioning (PRD section 4.5) -->
+<div class="stage" id="facepos-stage">
+  <div class="panel">
+    <h1>Position your face</h1>
+    <p class="muted">Sit on a <strong>chair with back support</strong>, about an arm's length away.
+      Face <strong>evenly lit from the front</strong>, camera at or just below eye level.
+      If you can, remove glasses. Hold still — good setup is what makes tracking accurate.</p>
+    <div class="facebox" id="facebox"><div class="ring"></div></div>
+    <div class="progress"><div id="facepos-progress" style="width:0%"></div></div>
+    <ul class="check-list" id="setup-hints" style="text-align:left"></ul>
+    <p class="hint" id="facepos-hint">Looking for your face…</p>
+    <div id="cam-picker" style="display:none; margin: 6px 0 2px">
+      <label for="cam-select" style="margin-top:0">Camera</label>
+      <select id="cam-select"></select>
+    </div>
+    <div class="btn-row">
+      <button class="btn lg" id="facepos-continue" disabled>Start calibration</button>
+      <button class="btn secondary lg" id="cam-retry" style="display:none">Retry camera</button>
+    </div>
+  </div>
+</div>
+
+<!-- 4. Calibration (PRD section 8) -->
+<div class="stage" id="calibration-stage">
+  <div class="panel" id="cal-intro">
+    <h1>Calibration</h1>
+    <p class="muted">We'll go full-screen. Look at each glowing dot and <strong>tap/click it a few times</strong>
+      while keeping your eyes on it. Dots turn green when done.</p>
+    <button class="btn lg" id="cal-start">Start full-screen calibration</button>
+  </div>
+  <div class="cal-hud" id="cal-hud" style="display:none">
+    <div id="cal-hud-text">Look at the glowing dot and tap it.</div>
+    <div class="cal-progress-pills" id="cal-pills"></div>
+  </div>
+</div>
+
+<!-- 4b. Gaze-burst spinner mini-game (gamified calibration) -->
+<div class="stage" id="spinner-stage">
+  <div class="cal-hud">
+    <div id="spinner-hud-text">Just <strong>look</strong> at the spinner — pop it with your eyes!</div>
+    <div class="cal-progress-pills" id="spinner-pills"></div>
+  </div>
+</div>
+
+<!-- 5. Validation (PRD section 8) -->
+<div class="stage" id="validation-stage">
+  <div class="panel" id="val-intro">
+    <h1>Accuracy check</h1>
+    <p class="muted">Look at each dot that appears and keep your eyes on it. Do not click.</p>
+    <button class="btn lg" id="val-start">Begin accuracy check</button>
+  </div>
+  <div class="panel" id="val-result" style="display:none"></div>
+</div>
+
+<!-- 6. Stimulus block -->
+<div class="stage" id="ready-stage">
+  <div class="panel">
+    <h1>You're calibrated</h1>
+    <p class="muted">The study will now show a series of images. Look naturally. The screen will go full-screen.</p>
+    <button class="btn lg" id="stim-begin">Begin study</button>
+  </div>
+</div>
+<div class="stage" id="stimulus-stage">
+  <img id="stimulus-img" style="position:absolute;display:none" alt="" />
+  <video id="stimulus-video" style="position:absolute;display:none" playsinline muted></video>
+</div>
+
+<!-- 7. Survey -->
+<div class="stage" id="survey-stage">
+  <div class="panel">
+    <h1>A few quick questions</h1>
+    <div id="survey-questions"></div>
+    <button class="btn lg" id="survey-submit" style="margin-top:18px">Submit</button>
+  </div>
+</div>
+
+<!-- 8. End -->
+<div class="stage" id="end-stage">
+  <div class="panel">
+    <h1 id="end-title">Thank you!</h1>
+    <p id="end-msg">Your responses have been recorded. You may now close this tab.</p>
+    <p class="muted" id="end-detail"></p>
+  </div>
+</div>
+
+<div class="gaze-dot" id="gaze-dot" style="display:none"></div>
+
+<script src="/js/api.js"></script>
+<script src="/js/engine.js"></script>
+<script src="/js/participant.js"></script>
+</body>
+</html>

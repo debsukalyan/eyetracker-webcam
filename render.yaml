@@ -1,0 +1,21 @@
+databases:
+  - name: eyetrack-db
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: eyetrack
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eyetrack-db
+          property: connectionString
+      # NOTE: Render's free plan has no persistent disk, so this stays on the
+      # container's local (ephemeral) filesystem — uploaded stimuli files and
+      # session recordings will NOT survive a sleep/wake cycle. Study data
+      # itself (sessions, gaze samples, calibration, QA) is safe: it lives in
+      # eyetrack-db (Postgres) above, not on disk.

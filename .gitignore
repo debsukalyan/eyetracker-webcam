@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local database + uploaded stimuli / generated artifacts
+backend/data/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local scratch/debug logs and tunnel state
+*.log
+*.out
+*.err
+manual_pid.txt
+.public-url.txt
+.claude/settings.local.json

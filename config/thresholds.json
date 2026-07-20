@@ -1,0 +1,38 @@
+{
+  "_comment": "Central QA / calibration / validation thresholds. Saved with every analysis run so reports are reproducible (PRD sections 8, 13, 17).",
+  "profile": "internal_pilot",
+  "calibration": {
+    "points": 9,
+    "samples_per_point_ms": 800,
+    "settle_ms": 200,
+    "max_retries": 2
+  },
+  "validation": {
+    "points": 7,
+    "_note": "RealEye's shipped gate is 300px (whitepaper); 200 is still stricter while ending the demoralizing retry loop. QA records exact medians regardless.",
+    "pass_median_error_px_desktop": 200,
+    "pass_median_error_px_mobile": 250
+  },
+  "qa": {
+    "min_valid_sample_pct": 60,
+    "max_face_lost_pct": 30,
+    "max_offscreen_pct": 30,
+    "min_fps_median": 10,
+    "completion_time_min_ratio": 0.5,
+    "completion_time_max_ratio": 2.5
+  },
+  "fixation": {
+    "method": "I-DT",
+    "dispersion_px": 100,
+    "min_duration_ms": 100
+  },
+  "smoothing": {
+    "method": "moving_median",
+    "window": 5
+  },
+  "privacy": {
+    "store_raw_video": false,
+    "store_face_images": false,
+    "raw_gaze_retention_months": 18
+  }
+}
