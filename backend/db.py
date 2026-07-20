@@ -195,6 +195,13 @@ CREATE INDEX IF NOT EXISTS idx_sessions_study ON sessions(study_id);
     "BIGSERIAL PRIMARY KEY" if USE_PG else "INTEGER PRIMARY KEY AUTOINCREMENT",
 )
 
+if USE_PG:
+    # SQLite's "INTEGER" is dynamically sized (effectively 64-bit) so it never
+    # complained about millisecond epoch timestamps (~1.7e12). Postgres's
+    # INTEGER is a strict 32-bit type (max ~2.1e9) and rejects them outright
+    # (NumericValueOutOfRange) — every INTEGER column here needs to be BIGINT.
+    SCHEMA = SCHEMA.replace("INTEGER", "BIGINT")
+
 
 # Columns added after initial release — applied to existing databases on startup.
 _MIGRATIONS = [
