@@ -248,15 +248,22 @@ async def create_participants(sid: str, req: Request):
 @app.get("/api/studies/{sid}/participants")
 def list_participants(sid: str):
     with db.get_conn() as conn:
+        # One row per participant, showing their most recent session's QA/validation.
+        # We pick that session with a correlated subquery instead of GROUP BY p.id:
+        # SQLite tolerates selecting non-aggregated columns alongside GROUP BY (it
+        # returns an arbitrary row), but Postgres rejects it outright, which 500'd
+        # this endpoint on the hosted deploy. The subquery is portable to both.
         rows = conn.execute(
             "SELECT p.*, s.id AS session_id, s.recording_url, s.started_at, s.ended_at, "
             "q.quality_grade, q.exclusion_reason, q.valid_sample_pct, q.face_lost_pct, "
             "q.offscreen_pct, q.fps_median, v.median_error_px, v.passed AS validation_passed "
             "FROM participants p "
-            "LEFT JOIN sessions s ON s.participant_id=p.id "
+            "LEFT JOIN sessions s ON s.id = ("
+            "  SELECT s2.id FROM sessions s2 WHERE s2.participant_id = p.id "
+            "  ORDER BY s2.started_at DESC LIMIT 1) "
             "LEFT JOIN qa_reports q ON q.session_id=s.id "
             "LEFT JOIN validations v ON v.session_id=s.id "
-            "WHERE p.study_id=? GROUP BY p.id ORDER BY p.id", (sid,)).fetchall()
+            "WHERE p.study_id=? ORDER BY p.id", (sid,)).fetchall()
         return {"participants": [dict(r) for r in rows]}
 
 
