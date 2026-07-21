@@ -19,7 +19,7 @@ import os
 import time
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import db
@@ -149,8 +149,10 @@ async def upload_stimulus(sid: str, file: UploadFile = File(...),
     fname = f"{stid}{ext}"
     path = os.path.join(STORAGE, fname)
     data = await file.read()
-    with open(path, "wb") as f:
+    with open(path, "wb") as f:      # local fast path
         f.write(data)
+    # Also persist to the DB so it survives an ephemeral-disk wipe (hosted free tier).
+    db.save_blob(fname, file.content_type, data)
     with db.get_conn() as conn:
         order = conn.execute(
             "SELECT COALESCE(MAX(order_index),-1)+1 n FROM stimuli WHERE study_id=?",
@@ -342,8 +344,10 @@ async def store_recording(sess: str, file: UploadFile = File(...)):
             raise HTTPException(403, "participant did not consent to recording")
     ext = os.path.splitext(file.filename or "")[1].lower() or ".webm"
     fname = f"rec_{sess}{ext}"
+    data = await file.read()
     with open(os.path.join(STORAGE, fname), "wb") as f:
-        f.write(await file.read())
+        f.write(data)
+    db.save_blob(fname, file.content_type, data)   # survive ephemeral-disk wipe
     with db.get_conn() as conn:
         conn.execute("UPDATE sessions SET recording_url=? WHERE id=?",
                      (f"/storage/{fname}", sess))
@@ -846,10 +850,15 @@ DEFAULT_CONSENT = (
 # ===========================================================================
 @app.get("/storage/{fname}")
 def serve_storage(fname: str):
-    path = os.path.join(STORAGE, os.path.basename(fname))
-    if not os.path.exists(path):
-        raise HTTPException(404, "file not found")
-    return FileResponse(path)
+    fname = os.path.basename(fname)
+    path = os.path.join(STORAGE, fname)
+    if os.path.exists(path):        # local disk fast path
+        return FileResponse(path)
+    blob = db.load_blob(fname)      # fall back to DB (hosted / after disk wipe)
+    if blob:
+        ct, data = blob
+        return Response(content=data, media_type=ct or "application/octet-stream")
+    raise HTTPException(404, "file not found")
 
 
 @app.get("/config/thresholds.json")

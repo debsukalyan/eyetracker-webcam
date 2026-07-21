@@ -185,6 +185,10 @@ CREATE TABLE IF NOT EXISTS exports (
     created_at INTEGER, created_by TEXT
 );
 
+CREATE TABLE IF NOT EXISTS blobs (
+    fname TEXT PRIMARY KEY, content_type TEXT, data {BLOB}, created_at INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_gaze_trial ON gaze_samples(trial_id);
 CREATE INDEX IF NOT EXISTS idx_gaze_session ON gaze_samples(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
@@ -193,6 +197,9 @@ CREATE INDEX IF NOT EXISTS idx_sessions_study ON sessions(study_id);
 """.replace(
     "{AUTOINCREMENT}",
     "BIGSERIAL PRIMARY KEY" if USE_PG else "INTEGER PRIMARY KEY AUTOINCREMENT",
+).replace(
+    # Raw file bytes: BYTEA on Postgres, BLOB on SQLite.
+    "{BLOB}", "BYTEA" if USE_PG else "BLOB",
 )
 
 if USE_PG:
@@ -254,3 +261,32 @@ def row_to_dict(row):
             except (ValueError, TypeError):
                 pass
     return d
+
+
+# ---------------------------------------------------------------------------
+# Blob storage. Uploaded stimulus images / recordings live in the DB, not on
+# local disk: hosted free tiers (Render) have an EPHEMERAL filesystem that is
+# wiped whenever the container sleeps/restarts, so disk-stored images 404 after
+# the first spin-down. The database persists, so the bytes must live there.
+# ---------------------------------------------------------------------------
+def save_blob(fname, content_type, data):
+    payload = psycopg2.Binary(data) if USE_PG else sqlite3.Binary(data)
+    with get_conn() as conn:
+        # Portable upsert: delete-then-insert (avoids ON CONFLICT dialect diffs).
+        conn.execute("DELETE FROM blobs WHERE fname=?", (fname,))
+        conn.execute(
+            "INSERT INTO blobs (fname,content_type,data,created_at) VALUES (?,?,?,?)",
+            (fname, content_type or "application/octet-stream", payload, _now_ms()))
+
+
+def load_blob(fname):
+    """Return (content_type, bytes) for a stored file, or None if absent."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT content_type, data FROM blobs WHERE fname=?", (fname,)).fetchone()
+    if not row:
+        return None
+    ct, data = row["content_type"], row["data"]
+    if isinstance(data, memoryview):   # psycopg2 returns BYTEA as memoryview
+        data = data.tobytes()
+    return ct, bytes(data)
