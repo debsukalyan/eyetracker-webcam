@@ -779,7 +779,7 @@ def export_csv(sid: str, kind: str):
                 "JOIN sessions s ON g.session_id=s.id WHERE s.study_id=? ORDER BY g.id",
                 (sid,)).fetchall()
             return _csv_response(
-                [tuple(r) for r in rows],
+                [db.row_values(r) for r in rows],
                 ["session_id", "trial_id", "t_ms", "norm_x", "norm_y", "confidence",
                  "face_present", "offscreen", "fps"], f"{sid}_raw_gaze.csv")
         if kind == "fixations":
@@ -789,7 +789,7 @@ def export_csv(sid: str, kind: str):
                 "WHERE t.session_id IN (SELECT id FROM sessions WHERE study_id=?) ORDER BY f.id",
                 (sid,)).fetchall()
             return _csv_response(
-                [tuple(r) for r in rows],
+                [db.row_values(r) for r in rows],
                 ["session_id", "trial_id", "start_ms", "end_ms", "duration_ms", "norm_x",
                  "norm_y", "aoi_id"], f"{sid}_fixations.csv")
         if kind == "qa":
@@ -798,7 +798,7 @@ def export_csv(sid: str, kind: str):
                 "q.fps_median,q.quality_grade,q.exclusion_reason FROM qa_reports q "
                 "JOIN sessions s ON q.session_id=s.id WHERE s.study_id=?", (sid,)).fetchall()
             return _csv_response(
-                [tuple(r) for r in rows],
+                [db.row_values(r) for r in rows],
                 ["session_id", "valid_sample_pct", "face_lost_pct", "offscreen_pct",
                  "fps_median", "quality_grade", "exclusion_reason"], f"{sid}_qa.csv")
         if kind == "events":
@@ -807,7 +807,7 @@ def export_csv(sid: str, kind: str):
                 "FROM events e JOIN sessions s ON e.session_id=s.id WHERE s.study_id=?",
                 (sid,)).fetchall()
             return _csv_response(
-                [tuple(r) for r in rows],
+                [db.row_values(r) for r in rows],
                 ["session_id", "trial_id", "event_type", "t_ms", "x", "y", "value"],
                 f"{sid}_events.csv")
         if kind == "responses":
@@ -816,7 +816,7 @@ def export_csv(sid: str, kind: str):
                 "FROM responses r JOIN sessions s ON r.session_id=s.id WHERE s.study_id=?",
                 (sid,)).fetchall()
             return _csv_response(
-                [tuple(r) for r in rows],
+                [db.row_values(r) for r in rows],
                 ["session_id", "question_id", "response_value", "response_time_ms"],
                 f"{sid}_responses.csv")
         if kind == "aoi_summary":
@@ -849,16 +849,40 @@ DEFAULT_CONSENT = (
 # Static hosting (frontend + stimulus storage)
 # ===========================================================================
 @app.get("/storage/{fname}")
-def serve_storage(fname: str):
+def serve_storage(fname: str, request: Request):
     fname = os.path.basename(fname)
     path = os.path.join(STORAGE, fname)
-    if os.path.exists(path):        # local disk fast path
+    if os.path.exists(path):        # local disk fast path (FileResponse does ranges)
         return FileResponse(path)
     blob = db.load_blob(fname)      # fall back to DB (hosted / after disk wipe)
-    if blob:
-        ct, data = blob
-        return Response(content=data, media_type=ct or "application/octet-stream")
-    raise HTTPException(404, "file not found")
+    if not blob:
+        raise HTTPException(404, "file not found")
+    ct, data = blob
+    ct = ct or "application/octet-stream"
+    total = len(data)
+    # HTML5 <video> requires HTTP Range support (206 partial content) to play/seek;
+    # a plain 200 full-body response makes videos fail (black screen) on the hosted
+    # deploy where they're served from the DB, not disk. Honour a single byte-range.
+    rng = request.headers.get("range")
+    if rng and rng.startswith("bytes="):
+        try:
+            first, last = rng.split("=", 1)[1].split(",")[0].strip().split("-")
+            start = int(first) if first else 0
+            end = int(last) if last else total - 1
+            start = max(0, start)
+            end = min(end, total - 1)
+            if start > end:
+                return Response(status_code=416,
+                                headers={"Content-Range": f"bytes */{total}"})
+            chunk = data[start:end + 1]
+            return Response(
+                content=chunk, status_code=206, media_type=ct,
+                headers={"Content-Range": f"bytes {start}-{end}/{total}",
+                         "Accept-Ranges": "bytes", "Content-Length": str(len(chunk))})
+        except (ValueError, IndexError):
+            pass   # malformed Range → fall through to full response
+    return Response(content=data, media_type=ct,
+                    headers={"Accept-Ranges": "bytes", "Content-Length": str(total)})
 
 
 @app.get("/config/thresholds.json")

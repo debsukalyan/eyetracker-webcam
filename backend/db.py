@@ -249,6 +249,16 @@ def init_db():
             )
 
 
+def row_values(row):
+    """Column values in order, for CSV export. Works on both backends:
+    tuple(sqlite3.Row) yields values, but tuple() of the dict-style rows
+    psycopg2 returns yields the KEYS — so exports came out as repeated column
+    names on Postgres. Pull .values() for dict rows instead."""
+    if isinstance(row, dict):
+        return tuple(row.values())
+    return tuple(row)
+
+
 def row_to_dict(row):
     if row is None:
         return None

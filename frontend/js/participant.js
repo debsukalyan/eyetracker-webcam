@@ -1139,25 +1139,35 @@
     box.innerHTML = '';
     state.surveyStart = Date.now();
     questions.forEach((q, i) => {
+      // Fall back to a positional id when the survey JSON omits "id" — otherwise
+      // every answer is keyed "undefined" and the responses collide/are useless.
+      const qid = q.id || ('q' + (i + 1));
       const wrap = document.createElement('div');
+      wrap.style.marginBottom = '18px';
       const lbl = document.createElement('label');
-      lbl.textContent = q.prompt;
+      lbl.textContent = q.prompt || ('Question ' + (i + 1));
       lbl.style.color = 'var(--text)';
       wrap.appendChild(lbl);
       if (q.type === 'choice') {
         const sel = document.createElement('select');
-        sel.dataset.qid = q.id;
+        sel.dataset.qid = qid;
         (q.options || []).forEach(o => {
           const op = document.createElement('option'); op.value = o; op.textContent = o; sel.appendChild(op);
         });
         wrap.appendChild(sel);
       } else if (q.type === 'scale') {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:12px';
         const inp = document.createElement('input');
-        inp.type = 'range'; inp.min = 1; inp.max = 5; inp.value = 3; inp.dataset.qid = q.id;
-        wrap.appendChild(inp);
+        inp.type = 'range'; inp.min = 1; inp.max = 5; inp.value = 3; inp.dataset.qid = qid;
+        const val = document.createElement('span');
+        val.textContent = '3'; val.style.cssText = 'color:var(--text);min-width:1.5em;text-align:center';
+        inp.oninput = () => { val.textContent = inp.value; };
+        row.appendChild(inp); row.appendChild(val);
+        wrap.appendChild(row);
       } else {
         const inp = document.createElement('input');
-        inp.type = 'text'; inp.dataset.qid = q.id;
+        inp.type = 'text'; inp.dataset.qid = qid;
         wrap.appendChild(inp);
       }
       box.appendChild(wrap);
@@ -1166,13 +1176,18 @@
   }
 
   async function submitSurvey() {
+    const btn = $('survey-submit');
+    btn.disabled = true;
     const inputs = document.querySelectorAll('#survey-questions [data-qid]');
     const responses = [];
     inputs.forEach(el => responses.push({
       question_id: el.dataset.qid, value: el.value,
       response_time_ms: Date.now() - state.surveyStart,
     }));
-    await API.post(`/api/session/${state.sessionId}/responses`, { responses });
+    // Don't strand the participant on the survey if the save call fails — record
+    // what we can, then always advance to the end screen.
+    try { await API.post(`/api/session/${state.sessionId}/responses`, { responses }); }
+    catch (e) { console.warn('survey save failed', e); }
     finishStudy();
   }
 
