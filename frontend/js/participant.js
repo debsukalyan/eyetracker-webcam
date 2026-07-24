@@ -273,16 +273,16 @@
         marker.style.display = 'none';
         state._faceDir = '';
       }
-      if (face && centered) {
+      // Progress is gated ONLY on face presence — never on centering. The marker +
+      // directional hints are purely advisory (a too-strict centering gate left the
+      // button permanently disabled even with a well-positioned face). Face present
+      // = you can proceed; the hint just nudges toward the ideal position.
+      if (face) {
         stableMs += 200;
-        $('facebox').classList.add('good');
-        $('facepos-hint').textContent = 'Great — hold still…' + dbg();
-      } else if (face) {
-        stableMs = Math.max(0, stableMs - 200);
-        $('facebox').classList.remove('good');
-        $('facepos-hint').textContent = (state._faceDir
-          ? 'Almost — ' + state._faceDir + ' to fill the oval'
-          : 'Center your face in the oval') + dbg();
+        $('facebox').classList.toggle('good', centered);
+        $('facepos-hint').textContent = (centered
+          ? 'Great — hold still…'
+          : 'Good — for best accuracy, ' + state._faceDir) + dbg();
       } else {
         stableMs = Math.max(0, stableMs - 400);
         $('facebox').classList.remove('good');
