@@ -115,10 +115,20 @@ tr:hover td { background: var(--panel-2); }
 #facepos-stage { background: #11161c; }
 /* Keep the whole face-setup panel compact so the "Start calibration" button
    stays on-screen without scrolling on laptop-height windows. */
-#facepos-panel { padding: 22px 28px; }
+#facepos-panel { padding: 22px 28px 96px; }   /* bottom room for the fixed action bar */
 #facepos-panel h1 { font-size: 24px; margin-bottom: 8px; }
 #facepos-panel .check-list li { padding: 5px 0; }
-#facepos-panel .btn-row { margin-top: 12px; }
+/* Pin the Start-calibration button to the bottom of the screen so it is ALWAYS
+   visible during face detection — never hidden below the fold. Only rendered
+   while the facepos stage is active (its display:none ancestor hides it otherwise). */
+#facepos-actions {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  display: flex; justify-content: center; gap: 12px; margin: 0;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: rgba(17, 22, 28, 0.97); border-top: 1px solid var(--border);
+  backdrop-filter: blur(4px);
+}
+#facepos-actions .btn { margin: 0; }
 /* Calibration/validation/spinners run on a BRIGHT background matching typical
    stimuli: pupils constrict and eyelids squint under bright light, which shifts the
    vertical gaze signal — calibrating dark and testing bright injects an upward bias
