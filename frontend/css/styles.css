@@ -137,6 +137,19 @@ tr:hover td { background: var(--panel-2); }
   position: absolute; inset: 24px; border: 3px dashed var(--muted); border-radius: 50%;
 }
 .facebox.good .ring { border-color: var(--ok); border-style: solid; }
+/* Live marker showing where the participant's face currently is, so they can
+   align it inside the target ring. Moves with the detected face centre. */
+.facebox .face-marker {
+  position: absolute; left: 50%; top: 50%; width: 30px; height: 30px;
+  margin: -15px 0 0 -15px; border: 3px solid var(--accent); border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(0,0,0,.5); transition: left .12s, top .12s; display: none;
+}
+.facebox.good .face-marker { border-color: var(--ok); }
+.facebox .face-target-label {
+  position: absolute; left: 0; right: 0; bottom: 6px; text-align: center;
+  font-size: 11px; color: var(--muted); text-shadow: 0 1px 3px #000; pointer-events: none;
+}
+.facebox.good .face-target-label { color: var(--ok); }
 .progress { height: 8px; background: var(--panel-2); border-radius: 99px; overflow: hidden; margin: 14px 0; }
 .progress > div { height: 100%; background: var(--accent); transition: width .2s; }
 .check-list { list-style: none; padding: 0; margin: 0; }

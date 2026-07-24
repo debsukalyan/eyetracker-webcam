@@ -155,9 +155,37 @@
       ...['desktop', 'both'].map(d => h('option', { value: d, ...(study.device_allowed === d ? { selected: 'selected' } : {}) },
         d === 'desktop' ? 'Desktop only' : 'Desktop + mobile')));
     const consent = h('textarea', { style: 'min-height:150px' }, study.consent_text || '');
-    const survey = h('textarea', { style: 'min-height:120px',
-      placeholder: 'Optional survey JSON, e.g. [{"id":"q1","type":"choice","prompt":"Which pack do you prefer?","options":["A","B"]}]' },
-      JSON.stringify((study.config && study.config.survey) || [], null, 2));
+
+    // Visual survey builder (replaces the old raw-JSON textarea, which threw
+    // "invalid JSON" the moment a non-technical user typed a question by hand).
+    const surveyList = h('div', { style: 'display:flex;flex-direction:column;gap:10px' });
+    function surveyRow(q = {}) {
+      const typeSel = h('select', { style: 'max-width:150px' },
+        ...[['choice', 'Multiple choice'], ['scale', 'Rating scale 1–5'], ['text', 'Free text']]
+          .map(([v, l]) => h('option', { value: v, ...(q.type === v ? { selected: 'selected' } : {}) }, l)));
+      const promptI = h('input', { type: 'text', placeholder: 'Question text (e.g. Which pack do you prefer?)', value: q.prompt || '' });
+      const optsI = h('input', { type: 'text', placeholder: 'Answer options, comma-separated (e.g. Pack A, Pack B, Pack C)', value: (q.options || []).join(', ') });
+      const optWrap = h('div', {}, optsI);
+      const syncOpts = () => { optWrap.style.display = typeSel.value === 'choice' ? '' : 'none'; };
+      typeSel.addEventListener('change', syncOpts); syncOpts();
+      const row = h('div', { class: 'card', style: 'padding:12px;margin:0;display:flex;flex-direction:column;gap:8px' },
+        h('div', { style: 'display:flex;gap:10px;align-items:center' },
+          typeSel,
+          h('button', { class: 'btn sm danger', style: 'margin-left:auto', onclick: () => row.remove() }, 'Remove')),
+        promptI, optWrap);
+      row._get = () => {
+        const prompt = promptI.value.trim();
+        if (!prompt) return null;               // skip blank questions
+        const out = { type: typeSel.value, prompt };
+        if (typeSel.value === 'choice') out.options = optsI.value.split(',').map(s => s.trim()).filter(Boolean);
+        return out;
+      };
+      return row;
+    }
+    ((study.config && study.config.survey) || []).forEach(q => surveyList.appendChild(surveyRow(q)));
+    const addQBtn = h('button', { class: 'btn sm', style: 'margin-top:8px',
+      onclick: () => surveyList.appendChild(surveyRow()) }, '+ Add question');
+
     const recordChk = h('input', { type: 'checkbox', style: 'width:auto',
       ...(study.config && study.config.record_session ? { checked: 'checked' } : {}) });
     const curEngine = (study.config && study.config.engine) || 'mediapipe';
@@ -175,16 +203,21 @@
       h('p', { class: 'hint' },
         'MediaPipe is our owned engine (iris tracking + per-participant model, ~130px median in lab validation). WebGazer is the earlier prototype.'),
       h('label', {}, 'Consent text (shown before camera starts)'), consent,
-      h('label', {}, 'Survey questions (JSON)'), survey,
+      h('label', {}, 'Survey questions (shown after the study)'), surveyList, addQBtn,
+      h('p', { class: 'hint' },
+        'Add one row per question. Multiple-choice shows a dropdown, rating scale shows a 1–5 slider, free text shows a text box. Leave blank to add none.'),
       h('label', { style: 'display:flex;align-items:center;gap:8px;margin-top:14px;color:var(--text)' },
         recordChk, 'Record participant webcam video (asks for separate consent; stored per session)'),
       h('p', { class: 'hint' },
         'Off by default. When on, participants must give an extra recording consent, and the webcam video is stored and viewable from each participant’s replay. Webcam frames are otherwise never stored.'),
       h('div', { class: 'btn-row', style: 'margin-top:16px' },
         h('button', { class: 'btn', onclick: async () => {
-          let surveyJson = [];
-          try { surveyJson = JSON.parse(survey.value || '[]'); }
-          catch (e) { return toast('Survey JSON is invalid: ' + e.message); }
+          // Build survey JSON from the visual rows — auto-assign stable ids so
+          // answers never collide (the old hand-typed JSON was the failure point).
+          const surveyJson = [...surveyList.children]
+            .map((r) => (r._get ? r._get() : null))
+            .filter(Boolean)
+            .map((q, i) => ({ id: 'q' + (i + 1), ...q }));
           await API.patch('/api/studies/' + study.id, {
             title: title.value, description: desc.value, device_allowed: device.value,
             consent_text: consent.value,
@@ -228,9 +261,28 @@
         } }, 'Upload'))),
       h('p', { class: 'hint' }, 'Images: JPG/PNG/WebP. Video: MP4/WebM. For video, set duration to 0 to play the full clip.'));
 
+    // Website / URL stimulus — loads a live site in the runtime and tracks gaze over it.
+    const urlInput = h('input', { type: 'url', placeholder: 'https://example.com', style: 'min-width:320px' });
+    const urlDur = h('input', { type: 'number', value: '15000', style: 'max-width:200px' });
+    body.appendChild(h('div', { class: 'card', style: 'margin-bottom:16px' },
+      h('h3', {}, 'Add a website (URL)'),
+      h('div', { style: 'display:flex;gap:12px;align-items:end;flex-wrap:wrap' },
+        h('div', {}, h('label', {}, 'Website URL'), urlInput),
+        h('div', {}, h('label', {}, 'Duration ms'), urlDur),
+        h('button', { class: 'btn', onclick: async () => {
+          const url = urlInput.value.trim();
+          if (!/^https?:\/\//i.test(url)) return toast('Enter a full URL starting with http:// or https://');
+          try {
+            await API.post(`/api/studies/${study.id}/stimuli/url`, { url, duration_ms: +urlDur.value || 15000 });
+            toast('Website added'); openStudy(study.id, 'Stimuli & AOIs');
+          } catch (e) { toast('Could not add: ' + e.message); }
+        } }, 'Add website'))),
+      h('p', { class: 'hint' },
+        'The participant sees the live website full-screen while we track their gaze. Note: some sites (e.g. Google, YouTube, most banks) block being embedded and will show blank — test your URL first with Preview below.'));
+
     const stimuli = study.stimuli || [];
     if (!stimuli.length) {
-      body.appendChild(h('div', { class: 'empty' }, 'No stimuli yet. Upload an image or video above.'));
+      body.appendChild(h('div', { class: 'empty' }, 'No stimuli yet. Upload an image/video or add a website above.'));
       return;
     }
     stimuli.forEach(st => body.appendChild(stimulusEditor(study, st)));
@@ -256,14 +308,34 @@
   }
 
   function stimulusEditor(study, st) {
+    const isUrl = st.type === 'url';
     const wrap = h('div', { class: 'card', style: 'margin-bottom:16px' });
     wrap.appendChild(h('div', { style: 'display:flex;justify-content:space-between;align-items:center' },
-      h('h3', { style: 'color:var(--text);text-transform:none' }, 'Stimulus · ' + st.duration_ms + 'ms'),
+      h('h3', { style: 'color:var(--text);text-transform:none' },
+        (isUrl ? 'Website · ' : 'Stimulus · ') + st.duration_ms + 'ms'),
       h('button', { class: 'btn danger', onclick: async () => {
         if (confirm('Delete this stimulus and its AOIs?')) {
           await API.del('/api/stimuli/' + st.id); openStudy(study.id, 'Stimuli & AOIs');
         }
       } }, 'Delete')));
+
+    if (isUrl) {
+      wrap.appendChild(h('p', { class: 'hint' },
+        'Live website stimulus. Participants view it full-screen while we track gaze. AOIs and heatmap-over-page are not available for live sites (cross-origin). Use Preview to confirm the site allows embedding.'));
+      wrap.appendChild(h('div', { style: 'display:flex;gap:12px;align-items:center;flex-wrap:wrap' },
+        h('a', { href: st.file_url, target: '_blank', class: 'mono', style: 'color:var(--accent)' }, st.file_url),
+        h('button', { class: 'btn sm', onclick: () => {
+          const box = wrap.querySelector('.url-preview');
+          if (box.style.display === 'none') {
+            box.style.display = 'block';
+            box.innerHTML = `<iframe src="${st.file_url}" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px;background:#fff"></iframe>`
+              + '<p class="hint">If this stays blank, the site blocks embedding and cannot be used as a stimulus.</p>';
+          } else { box.style.display = 'none'; box.innerHTML = ''; }
+        } }, 'Preview')));
+      wrap.appendChild(h('div', { class: 'url-preview', style: 'display:none;margin-top:12px' }));
+      return wrap;
+    }
+
     wrap.appendChild(h('p', { class: 'hint' },
       'Draw rectangular AOIs by dragging on the image. Drag a box to move, drag its corner to resize, double-click to rename, right-click to delete.'));
 
@@ -454,6 +526,26 @@
                 : `Stimulus · ${data.n_sessions} usable session(s)`));
     if (data.n_sessions === 0) {
       wrap.appendChild(h('p', { class: 'muted' }, 'No usable gaze data yet for this stimulus.'));
+      return wrap;
+    }
+    // Website stimulus: cross-origin, can't be captured to a canvas, so show the
+    // gaze heatmap on a blank viewport-shaped panel with a link to the site.
+    if (st.type === 'url') {
+      wrap.appendChild(h('p', { class: 'hint' },
+        h('span', {}, 'Website: '),
+        h('a', { href: st.file_url, target: '_blank', class: 'mono', style: 'color:var(--accent)' }, st.file_url)));
+      const holder = h('div', { style: 'position:relative;width:100%;max-width:640px;aspect-ratio:16/9;background:var(--panel-2);border:1px solid var(--border);border-radius:8px' });
+      const canvas = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
+      holder.appendChild(canvas);
+      wrap.appendChild(holder);
+      const drawWhenSized = () => {
+        const w = holder.clientWidth, hh = holder.clientHeight;
+        if (!w || !hh) { requestAnimationFrame(drawWhenSized); return; }
+        canvas.width = w; canvas.height = hh;
+        try { drawHeatmap(canvas, data.heatmap_points); } catch (e) { console.warn('heatmap draw failed', e); }
+      };
+      requestAnimationFrame(drawWhenSized);
+      wrap.appendChild(h('p', { class: 'hint' }, 'Heatmap shows where gaze concentrated on screen (relative to the full viewport).'));
       return wrap;
     }
     // heatmap canvas over the stimulus (image or video frame)

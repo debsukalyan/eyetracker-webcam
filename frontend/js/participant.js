@@ -249,13 +249,44 @@
         $('facepos-hint').textContent = 'Starting camera & loading face model…' + dbg();
         return;
       }
-      if (face) {
+      // Live face marker + directional guidance so the participant can align their
+      // face inside the target oval (the outline) for the best tracking data.
+      const marker = $('face-marker');
+      const fm = (face && state.engine.faceMetrics) ? state.engine.faceMetrics() : null;
+      // Default true so engines without position metrics (e.g. WebGazer) aren't blocked.
+      let centered = true;
+      if (fm && fm.cx != null) {
+        // Video is mirrored (scaleX -1), so display x = 1 - cx. cy is top-origin.
+        marker.style.display = 'block';
+        marker.style.left = ((1 - fm.cx) * 100) + '%';
+        marker.style.top = (fm.cy * 100) + '%';
+        const dx = fm.cx - 0.5, dy = fm.cy - 0.45;       // offset from target centre
+        const scale = fm.faceScale || 0.2;
+        let dir = '';
+        if (scale < 0.11) dir = 'move a bit closer';
+        else if (scale > 0.34) dir = 'move back a little';
+        else if (Math.abs(dx) > 0.12) dir = dx > 0 ? 'move right' : 'move left';  // mirror-correct
+        else if (Math.abs(dy) > 0.13) dir = dy > 0 ? 'move up' : 'move down';
+        centered = !dir;
+        state._faceDir = dir;
+      } else {
+        marker.style.display = 'none';
+        state._faceDir = '';
+      }
+      if (face && centered) {
         stableMs += 200;
         $('facebox').classList.add('good');
         $('facepos-hint').textContent = 'Great — hold still…' + dbg();
+      } else if (face) {
+        stableMs = Math.max(0, stableMs - 200);
+        $('facebox').classList.remove('good');
+        $('facepos-hint').textContent = (state._faceDir
+          ? 'Almost — ' + state._faceDir + ' to fill the oval'
+          : 'Center your face in the oval') + dbg();
       } else {
         stableMs = Math.max(0, stableMs - 400);
         $('facebox').classList.remove('good');
+        marker.style.display = 'none';
         $('facepos-hint').textContent = 'Move into the frame and ensure good lighting…' + dbg();
       }
       $('facepos-progress').style.width = Math.min(100, 100 * stableMs / need) + '%';
@@ -1012,8 +1043,9 @@
         onset_ts: null, first_frame_ts: null,
       });
       state.currentTrialId = trial.trial_id;
-      const isVideo = (stim.type === 'video') ||
-        /\.(mp4|webm|ogg)$/i.test(stim.file_url || '');
+      const isUrl = stim.type === 'url';
+      const isVideo = !isUrl && ((stim.type === 'video') ||
+        /\.(mp4|webm|ogg)$/i.test(stim.file_url || ''));
 
       let finished = false;
       const finishTrial = async () => {
@@ -1030,9 +1062,30 @@
         pushEvent('stim_onset', { stimulus_id: stim.id, onset: Date.now() });
       };
 
-      if (isVideo) {
+      if (isUrl) {
+        // Live website: load in a full-viewport iframe, track gaze over the whole screen.
+        const frame = $('stimulus-frame');
+        $('stimulus-img').style.display = 'none';
+        $('stimulus-video').style.display = 'none';
+        frame.style.display = 'block';
+        Object.assign(frame.style, { left: '0', top: '0',
+          width: window.innerWidth + 'px', height: window.innerHeight + 'px' });
+        state.stimRect = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+        let started = false;
+        const start = () => {
+          if (started) return; started = true;
+          beginCapture();
+          runTrialClock((stim.duration_ms && stim.duration_ms > 0) ? stim.duration_ms : 15000,
+            null, finishTrial);
+        };
+        frame.onload = start;
+        frame.src = stim.file_url;
+        // Sites that block embedding (X-Frame-Options) never fire onload — start anyway.
+        setTimeout(start, 1800);
+      } else if (isVideo) {
         const video = $('stimulus-video');
         $('stimulus-img').style.display = 'none';
+        $('stimulus-frame').style.display = 'none';
         video.style.display = 'block';
         video.onloadedmetadata = () => {
           const r = fitRect(video.videoWidth || 1280, video.videoHeight || 720);
@@ -1050,6 +1103,7 @@
       } else {
         const img = $('stimulus-img');
         $('stimulus-video').style.display = 'none';
+        $('stimulus-frame').style.display = 'none';
         img.style.display = 'block';
         img.onload = () => {
           const r = fitRect(img.naturalWidth, img.naturalHeight);

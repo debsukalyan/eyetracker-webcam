@@ -165,6 +165,27 @@ async def upload_stimulus(sid: str, file: UploadFile = File(...),
     return {"id": stid, "file_url": f"/storage/{fname}", "order_index": order}
 
 
+@app.post("/api/studies/{sid}/stimuli/url")
+async def add_url_stimulus(sid: str, req: Request):
+    """A live website as a stimulus: no file, just a URL the runtime loads in an
+    iframe and tracks gaze over. file_url holds the URL; type='url'."""
+    body = await req.json()
+    url = (body.get("url") or "").strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(400, "URL must start with http:// or https://")
+    stid = db.new_id("stim")
+    duration_ms = int(body.get("duration_ms") or 15000)
+    with db.get_conn() as conn:
+        order = conn.execute(
+            "SELECT COALESCE(MAX(order_index),-1)+1 n FROM stimuli WHERE study_id=?",
+            (sid,)).fetchone()["n"]
+        conn.execute(
+            "INSERT INTO stimuli (id,study_id,condition_id,type,file_url,duration_ms,"
+            "width_px,height_px,order_index) VALUES (?,?,?,?,?,?,?,?,?)",
+            (stid, sid, None, "url", url, duration_ms, 0, 0, order))
+    return {"id": stid, "file_url": url, "type": "url", "order_index": order}
+
+
 @app.get("/api/studies/{sid}/stimuli")
 def list_stimuli(sid: str):
     with db.get_conn() as conn:
