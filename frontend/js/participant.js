@@ -142,6 +142,13 @@
   // ---- 3. camera + face positioning ------------------------------------
   async function startCamera() {
     show('facepos-stage');
+    // Mobile is supported when the phone is kept STATIONARY (propped up, not held) —
+    // the calibration assumes a fixed head↔screen geometry, which a handheld phone
+    // breaks. Swap in phone-specific guidance so participants set up correctly.
+    if (state.deviceType === 'mobile') {
+      const note = $('mobile-setup-note'); if (note) note.style.display = '';
+      const desc = $('facepos-desc'); if (desc) desc.style.display = 'none';
+    }
     // Engine is chosen per study (Build tab). 'mediapipe' = in-house engine (Route B),
     // 'webgazer' = legacy fallback. The runtime only talks to the GazeEngine interface.
     state.engineName = (state.study.config && state.study.config.engine) || 'mediapipe';
@@ -825,6 +832,17 @@
       if (!state.capturing) return;
       pushEvent('click', { x: e.clientX, y: e.clientY }, e.clientX, e.clientY);
     });
+
+    // Keep the stimulus fitted (and gaze normalization correct) when the viewport
+    // changes mid-trial — mobile toolbar show/hide or a device rotation. Debounced.
+    let refitT = null;
+    const onViewportChange = () => {
+      clearTimeout(refitT);
+      refitT = setTimeout(() => { refitActiveStimulus(); pushEvent('viewport',
+        { w: window.innerWidth, h: window.innerHeight }); }, 180);
+    };
+    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('orientationchange', () => setTimeout(onViewportChange, 250));
   }
 
   function pushEvent(type, value, x = null, y = null) {
@@ -1036,6 +1054,26 @@
     return { left: (vw - w) / 2, top: (vh - h) / 2, width: w, height: h };
   }
 
+  // Re-fit the currently displayed stimulus and refresh state.stimRect. On mobile the
+  // browser toolbar showing/hiding (or a rotation) changes innerWidth/innerHeight
+  // mid-trial; without this, gaze would normalize against a stale rectangle.
+  function refitActiveStimulus() {
+    const a = state.activeStim;
+    if (!a) return;
+    if (a.kind === 'url') {
+      const f = $('stimulus-frame');
+      Object.assign(f.style, { width: window.innerWidth + 'px', height: window.innerHeight + 'px' });
+      state.stimRect = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    } else if (a.el) {
+      const nw = a.kind === 'video' ? (a.el.videoWidth || 1280) : a.el.naturalWidth;
+      const nh = a.kind === 'video' ? (a.el.videoHeight || 720) : a.el.naturalHeight;
+      const r = fitRect(nw, nh);
+      Object.assign(a.el.style, { left: r.left + 'px', top: r.top + 'px',
+        width: r.width + 'px', height: r.height + 'px' });
+      state.stimRect = r;
+    }
+  }
+
   function showStimulus(stim, index) {
     return new Promise(async (resolve) => {
       const trial = await API.post(`/api/session/${state.sessionId}/trial`, {
@@ -1051,6 +1089,7 @@
       const finishTrial = async () => {
         if (finished) return;           // video 'ended' + clock cap can both fire
         finished = true;
+        state.activeStim = null;
         if (state.trialClock) { clearInterval(state.trialClock); state.trialClock = null; }
         state.capturing = false;
         await API.patch(`/api/trial/${trial.trial_id}`, { offset_ts: Date.now() });
@@ -1078,6 +1117,7 @@
           runTrialClock((stim.duration_ms && stim.duration_ms > 0) ? stim.duration_ms : 15000,
             null, finishTrial);
         };
+        state.activeStim = { kind: 'url' };
         frame.onload = start;
         frame.src = stim.file_url;
         // Sites that block embedding (X-Frame-Options) never fire onload — start anyway.
@@ -1093,6 +1133,7 @@
             width: r.width + 'px', height: r.height + 'px' });
           state.stimRect = r;
         };
+        state.activeStim = { kind: 'video', el: video };
         video.onplay = beginCapture;
         // End on natural end of video, or the configured cap if set (>0).
         video.onended = finishTrial;
@@ -1110,6 +1151,7 @@
           Object.assign(img.style, { left: r.left + 'px', top: r.top + 'px',
             width: r.width + 'px', height: r.height + 'px' });
           state.stimRect = r;
+          state.activeStim = { kind: 'image', el: img };
           beginCapture();
           runTrialClock(stim.duration_ms || 5000, null, finishTrial);
         };
