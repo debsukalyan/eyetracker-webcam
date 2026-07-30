@@ -46,7 +46,13 @@ export class FaceMeshTracker {
   // not pure black before accepting.
   async startCamera(videoEl, deviceId = null) {
     this.video = videoEl;
-    const hi = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+    // Phones can't process 1080p frames through the landmark model fast enough — the fps
+    // craters ("camera slow"). Request a lighter feed on mobile; the model downsamples
+    // internally anyway, so accuracy is unaffected while fps roughly doubles.
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    const hi = isMobile
+      ? { width: { ideal: 960 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }
+      : { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
     const tryList = [];
     if (deviceId) tryList.push({ deviceId: { exact: deviceId }, ...hi });
     tryList.push({ facingMode: 'user', ...hi });

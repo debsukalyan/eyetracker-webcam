@@ -170,6 +170,18 @@ tr:hover td { background: var(--panel-2); }
   font-size: 11px; color: var(--muted); text-shadow: 0 1px 3px #000; pointer-events: none;
 }
 .facebox.good .face-target-label { color: var(--ok); }
+/* Head re-center reference frame (shown mid-study on a bright overlay): a target
+   circle + a dot marking the head's current offset, so "adjust your head" has a
+   concrete visual to aim at. */
+.hg-facebox { position: relative; width: 200px; height: 160px; margin: 0 auto;
+  border: 2px solid #b9c2cc; border-radius: 12px; background: #eef1f4; }
+.hg-facebox .ring { position: absolute; inset: 26px; border: 3px dashed #9aa6b2; border-radius: 50%; }
+.hg-facebox .face-marker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px;
+  margin: -13px 0 0 -13px; border: 3px solid var(--accent); border-radius: 50%;
+  background: rgba(79,156,249,.25); transition: left .1s, top .1s; }
+.hg-facebox .face-marker.good { border-color: var(--ok); background: rgba(54,194,122,.35); }
+.hg-facebox .hg-target-label { position: absolute; left: 0; right: 0; bottom: 6px;
+  text-align: center; font-size: 11px; color: #7a8590; }
 .progress { height: 8px; background: var(--panel-2); border-radius: 99px; overflow: hidden; margin: 14px 0; }
 .progress > div { height: 100%; background: var(--accent); transition: width .2s; }
 .check-list { list-style: none; padding: 0; margin: 0; }

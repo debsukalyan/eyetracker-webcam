@@ -64,7 +64,8 @@
     const title = h('input', { placeholder: 'e.g. Q3 Pack Shelf Test' });
     const desc = h('textarea', { placeholder: 'What is being tested and why' });
     const type = h('select', {}, h('option', { value: 'image' }, 'Static images'),
-      h('option', { value: 'video' }, 'Video (beta)'));
+      h('option', { value: 'video' }, 'Video'),
+      h('option', { value: 'url' }, 'Website (URL)'));
     const device = h('select', {},
       h('option', { value: 'desktop' }, 'Desktop only (recommended)'),
       h('option', { value: 'both' }, 'Desktop + mobile'));
@@ -242,47 +243,66 @@
   // ---- Stimuli & AOIs -------------------------------------------------
   async function tabStimuli(study, body) {
     clear(body);
-    const fileInput = h('input', { type: 'file', accept: 'image/*,video/mp4,video/webm', style: 'max-width:340px' });
-    const dur = h('input', { type: 'number', value: '5000', style: 'max-width:200px' });
-    body.appendChild(h('div', { class: 'card', style: 'margin-bottom:16px' },
-      h('h3', {}, 'Upload stimulus'),
-      h('div', { style: 'display:flex;gap:12px;align-items:end;flex-wrap:wrap' },
-        h('div', {}, h('label', {}, 'Image or video file'), fileInput),
-        h('div', {}, h('label', {}, 'Duration ms (video: 0 = full clip)'), dur),
-        h('button', { class: 'btn', onclick: async () => {
-          const f = fileInput.files[0];
-          if (!f) return toast('Choose an image or video');
-          const isVideo = /^video\//.test(f.type) || /\.(mp4|webm|ogg)$/i.test(f.name);
-          const dims = isVideo ? await videoDims(f) : await imageDims(f);
-          await API.upload(`/api/studies/${study.id}/stimuli`, f,
-            { duration_ms: dur.value, type: isVideo ? 'video' : 'image',
-              width_px: dims.w, height_px: dims.h });
-          toast('Uploaded'); openStudy(study.id, 'Stimuli & AOIs');
-        } }, 'Upload'))),
-      h('p', { class: 'hint' }, 'Images: JPG/PNG/WebP. Video: MP4/WebM. For video, set duration to 0 to play the full clip.'));
 
-    // Website / URL stimulus — loads a live site in the runtime and tracks gaze over it.
-    const urlInput = h('input', { type: 'url', placeholder: 'https://example.com', style: 'min-width:320px' });
-    const urlDur = h('input', { type: 'number', value: '15000', style: 'max-width:200px' });
-    body.appendChild(h('div', { class: 'card', style: 'margin-bottom:16px' },
-      h('h3', {}, 'Add a website (URL)'),
-      h('div', { style: 'display:flex;gap:12px;align-items:end;flex-wrap:wrap' },
-        h('div', {}, h('label', {}, 'Website URL'), urlInput),
-        h('div', {}, h('label', {}, 'Duration ms'), urlDur),
-        h('button', { class: 'btn', onclick: async () => {
+    // Unified "Add stimulus": choose the type first (static image / video / website),
+    // then only the relevant input is shown.
+    const typeSel = h('select', { style: 'max-width:200px' },
+      h('option', { value: 'image' }, 'Static image'),
+      h('option', { value: 'video' }, 'Video'),
+      h('option', { value: 'url' }, 'Website (URL)'));
+    const fileInput = h('input', { type: 'file', accept: 'image/*', style: 'max-width:340px' });
+    const urlInput = h('input', { type: 'url', placeholder: 'https://example.com', style: 'min-width:300px' });
+    const dur = h('input', { type: 'number', value: '5000', style: 'max-width:180px' });
+    const fileLabel = h('label', {}, 'Image file');
+    const fileField = h('div', {}, fileLabel, fileInput);
+    const urlField = h('div', {}, h('label', {}, 'Website URL'), urlInput);
+    const durField = h('div', {}, h('label', {}, 'Duration ms'), dur);
+    const hint = h('p', { class: 'hint' }, '');
+
+    function syncType() {
+      const t = typeSel.value;
+      fileField.style.display = (t === 'image' || t === 'video') ? '' : 'none';
+      urlField.style.display = t === 'url' ? '' : 'none';
+      if (t === 'image') { fileInput.accept = 'image/*'; fileLabel.textContent = 'Image file'; }
+      if (t === 'video') { fileInput.accept = 'video/mp4,video/webm'; fileLabel.textContent = 'Video file'; }
+      if (t === 'url' && (dur.value === '5000' || !dur.value)) dur.value = '15000';
+      hint.textContent = t === 'image'
+        ? 'JPG / PNG / WebP. Shown for the duration you set.'
+        : t === 'video'
+        ? 'MP4 / WebM. Set duration to 0 to play the full clip.'
+        : 'The participant sees the live website full-screen while we track their gaze. It renders responsively (mobile participants see the mobile layout). Some sites (Google, YouTube, banks) block embedding and show blank — check with Preview after adding.';
+    }
+    typeSel.addEventListener('change', syncType); syncType();
+
+    const addBtn = h('button', { class: 'btn', onclick: async () => {
+      const t = typeSel.value;
+      try {
+        if (t === 'url') {
           const url = urlInput.value.trim();
           if (!/^https?:\/\//i.test(url)) return toast('Enter a full URL starting with http:// or https://');
-          try {
-            await API.post(`/api/studies/${study.id}/stimuli/url`, { url, duration_ms: +urlDur.value || 15000 });
-            toast('Website added'); openStudy(study.id, 'Stimuli & AOIs');
-          } catch (e) { toast('Could not add: ' + e.message); }
-        } }, 'Add website'))),
-      h('p', { class: 'hint' },
-        'The participant sees the live website full-screen while we track their gaze. Note: some sites (e.g. Google, YouTube, most banks) block being embedded and will show blank — test your URL first with Preview below.'));
+          await API.post(`/api/studies/${study.id}/stimuli/url`, { url, duration_ms: +dur.value || 15000 });
+        } else {
+          const f = fileInput.files[0];
+          if (!f) return toast('Choose a ' + t + ' file');
+          const isVideo = t === 'video';
+          const dims = isVideo ? await videoDims(f) : await imageDims(f);
+          await API.upload(`/api/studies/${study.id}/stimuli`, f,
+            { duration_ms: dur.value, type: isVideo ? 'video' : 'image', width_px: dims.w, height_px: dims.h });
+        }
+        toast('Stimulus added'); openStudy(study.id, 'Stimuli & AOIs');
+      } catch (e) { toast('Could not add: ' + e.message); }
+    } }, 'Add stimulus');
+
+    body.appendChild(h('div', { class: 'card', style: 'margin-bottom:16px' },
+      h('h3', {}, 'Add stimulus'),
+      h('div', { style: 'display:flex;gap:12px;align-items:end;flex-wrap:wrap' },
+        h('div', {}, h('label', {}, 'Type'), typeSel),
+        fileField, urlField, durField, addBtn),
+      hint));
 
     const stimuli = study.stimuli || [];
     if (!stimuli.length) {
-      body.appendChild(h('div', { class: 'empty' }, 'No stimuli yet. Upload an image/video or add a website above.'));
+      body.appendChild(h('div', { class: 'empty' }, 'No stimuli yet. Add an image, video, or website above.'));
       return;
     }
     stimuli.forEach(st => body.appendChild(stimulusEditor(study, st)));

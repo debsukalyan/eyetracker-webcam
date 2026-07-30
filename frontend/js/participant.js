@@ -93,7 +93,13 @@
     state.deviceType = isMobile ? 'mobile' : 'desktop';
     const allowed = state.study.device_allowed || 'desktop';
 
-    const screenOk = window.screen.width >= 800 && window.screen.height >= 600;
+    // Phones are portrait and far smaller than a laptop — judge them by a phone-
+    // appropriate minimum, not the 800×600 desktop bar (which wrongly flagged every
+    // phone as "dimensions don't agree" even on mobile-allowed studies).
+    const minW = isMobile ? 320 : 800, minH = isMobile ? 480 : 600;
+    const shortSide = Math.min(window.screen.width, window.screen.height);
+    const longSide = Math.max(window.screen.width, window.screen.height);
+    const screenOk = shortSide >= minW && longSide >= minH;
     const browser = detectBrowser();
     const browserOk = ['Chrome', 'Edge', 'Opera'].includes(browser);
     const hasCam = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -101,7 +107,8 @@
                      (allowed === 'desktop' && !isMobile);
 
     checks.push(['Browser', browser, browserOk, 'Chrome or Edge recommended for accuracy']);
-    checks.push(['Screen size', `${window.screen.width}×${window.screen.height}`, screenOk, 'Minimum 800×600']);
+    checks.push(['Screen size', `${window.screen.width}×${window.screen.height}`, screenOk,
+      isMobile ? `Minimum ${minW}×${minH}` : 'Minimum 800×600']);
     checks.push(['Camera API', hasCam ? 'available' : 'missing', hasCam, 'A webcam is required']);
     checks.push(['Device type', state.deviceType, deviceOk,
       allowed === 'desktop' ? 'This study requires a desktop/laptop' : 'OK']);
@@ -857,8 +864,13 @@
     state.driftInit = false;    // first accepted anchor sets the baseline
     state.driftCount = 0;       // anchor rotation starts at centre
     // Begin optional webcam recording (only if the participant consented).
+    // Guarded: recording is a nice-to-have and must NEVER block the study from
+    // starting (a missing/failed recorder previously threw here and stranded the
+    // participant on the "You're calibrated" screen).
     if (state.recordingConsented) {
-      state.recording = state.engine.startRecording();
+      try {
+        state.recording = state.engine.startRecording ? state.engine.startRecording() : false;
+      } catch (e) { console.warn('recording start failed (non-fatal):', e && e.message); state.recording = false; }
     }
     show('stimulus-stage');
     const dot = $('gaze-dot');
@@ -914,14 +926,41 @@
       // and shifts the vertical gaze signal for the seconds that follow.
       ov.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;' +
         'align-items:center;justify-content:center;background:#d9dde2;z-index:5;text-align:center';
-      ov.innerHTML = '<h2 style="margin:0 0 8px;color:#1c2733">Please re-center your head</h2>' +
-        '<p id="hg-hint" style="max-width:420px;color:#5a6672"></p>';
+      ov.innerHTML = '<h2 style="margin:0 0 10px;color:#1c2733">Re-center your head</h2>' +
+        '<div class="hg-facebox"><div class="ring"></div>' +
+        '<div class="face-marker" id="hg-marker"></div>' +
+        '<div class="hg-target-label">get the dot into the circle</div></div>' +
+        '<p id="hg-hint" style="max-width:420px;color:#5a6672;margin-top:10px"></p>' +
+        '<button id="hg-skip" class="btn" style="display:none;margin-top:8px">Continue anyway</button>';
       $('stimulus-stage').appendChild(ov);
       pushEvent('head_guard', { dx: dev0.dx, dy: dev0.dy, scale: dev0.scaleRatio });
-      let okMs = 0;
+      let okMs = 0, waited = 0, done = false;
+      const finish = (reason) => {
+        if (done) return; done = true;
+        clearInterval(tick); ov.remove(); state.hideDot = false;
+        pushEvent('head_guard_done', { reason });
+        resolve();
+      };
       const tick = setInterval(() => {
+        waited += 150;
         const d = state.engine.headDeviation();
+        // A "Continue anyway" escape appears after 6s, and we auto-continue after 18s —
+        // the re-center check must NEVER be able to trap a participant forever (this hung
+        // "Begin study" on mobile, where the pose check rarely reads ok).
+        if (waited >= 6000) { const b = $('hg-skip'); if (b) { b.style.display = ''; b.onclick = () => finish('manual'); } }
+        if (waited >= 18000) return finish('timeout');
         if (!d) return;
+        // Visual reference frame: the dashed circle is the calibration pose (target),
+        // the dot is the head's CURRENT offset from it. Move so the dot sits in the
+        // circle — far more effective than a text-only instruction.
+        const marker = $('hg-marker');
+        if (marker) {
+          const k = 85;   // face-width offset units -> % of the box
+          const mx = Math.max(10, Math.min(90, 50 + d.dx * k));
+          const my = Math.max(10, Math.min(90, 50 + d.dy * k));
+          marker.style.left = mx + '%'; marker.style.top = my + '%';
+          marker.classList.toggle('good', !!d.ok);
+        }
         const hint = $('hg-hint');
         if (hint) {
           const dir = [];
@@ -929,11 +968,11 @@
           if (d.dy > 0.35) dir.push('move up');   if (d.dy < -0.35) dir.push('move down');
           if (d.scaleRatio <= 0.85) dir.push('come closer');
           if (d.scaleRatio >= 1.18) dir.push('move back a little');
-          hint.textContent = d.ok ? 'Hold still…' :
+          hint.textContent = d.ok ? 'Perfect — hold still…' :
             'Sit like you did during calibration — ' + (dir.join(', ') || 'adjust slightly') + '.';
         }
         okMs = d.ok ? okMs + 150 : 0;
-        if (okMs >= 900) { clearInterval(tick); ov.remove(); state.hideDot = false; resolve(); }
+        if (okMs >= 900) finish('ok');
       }, 150);
     });
   }

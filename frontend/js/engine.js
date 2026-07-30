@@ -17,6 +17,34 @@ class GazeEngine {
   predict() { return null; }          // -> {x, y} viewport px, or null
   getQuality() { return { facePresent: false, fps: 0 }; }
   exportDebug() { return {}; }
+
+  // --- optional session (webcam) recording, shared by all engines ----------
+  // Records from this.video's stream (set by MediaPipeEngine). WebGazer overrides
+  // these to use its own feed element. Previously ONLY WebGazer had these, so a
+  // MediaPipe study with recording enabled threw "startRecording is not a function"
+  // on Begin study and stranded the participant — this base impl prevents that.
+  startRecording() {
+    try {
+      if (typeof MediaRecorder === 'undefined') return false;
+      const stream = this.video && this.video.srcObject;
+      if (!stream) return false;
+      this._chunks = [];
+      const prefer = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+      const mime = prefer.find(m => MediaRecorder.isTypeSupported(m)) || '';
+      this._recorder = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 600000 } : {});
+      this._recorder.ondataavailable = (e) => { if (e.data && e.data.size) this._chunks.push(e.data); };
+      this._recorder.start(1000);
+      return true;
+    } catch (e) { console.warn('recording failed to start:', e && e.message); return false; }
+  }
+
+  stopRecording() {
+    return new Promise((resolve) => {
+      if (!this._recorder || this._recorder.state === 'inactive') return resolve(null);
+      this._recorder.onstop = () => resolve(new Blob(this._chunks || [], { type: 'video/webm' }));
+      try { this._recorder.stop(); } catch (e) { resolve(null); }
+    });
+  }
 }
 
 class WebGazerEngine extends GazeEngine {
