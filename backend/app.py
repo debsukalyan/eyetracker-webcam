@@ -375,6 +375,47 @@ async def store_recording(sess: str, file: UploadFile = File(...)):
     return {"ok": True, "recording_url": f"/storage/{fname}"}
 
 
+@app.post("/api/session/{sess}/screen-recording")
+async def store_screen_recording(sess: str, file: UploadFile = File(...),
+                                 gaze_track: str = Form("[]")):
+    """Screen recording of the study (what the participant actually saw — scrolling
+    websites, playing videos) + a time-synced screen-normalized gaze track for the
+    replay overlay. gaze_track is JSON: [[t_ms_from_recording_start, x, y], ...]
+    with x,y normalized to the viewport (0..1)."""
+    with db.get_conn() as conn:
+        if not conn.execute("SELECT id FROM sessions WHERE id=?", (sess,)).fetchone():
+            raise HTTPException(404, "session not found")
+    ext = os.path.splitext(file.filename or "")[1].lower() or ".webm"
+    fname = f"screen_{sess}{ext}"
+    data = await file.read()
+    try:
+        with open(os.path.join(STORAGE, fname), "wb") as f:
+            f.write(data)
+    except Exception:
+        pass
+    db.save_blob(fname, file.content_type, data)   # survive ephemeral-disk wipe
+    with db.get_conn() as conn:
+        conn.execute("UPDATE sessions SET screen_recording_url=?, screen_gaze_json=? WHERE id=?",
+                     (f"/storage/{fname}", gaze_track or "[]", sess))
+    return {"ok": True, "screen_recording_url": f"/storage/{fname}"}
+
+
+@app.get("/api/session/{sess}/screen-replay")
+def get_screen_replay(sess: str):
+    """Replay payload: the screen recording URL + the synced gaze track."""
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT screen_recording_url, screen_gaze_json FROM sessions WHERE id=?",
+            (sess,)).fetchone()
+    if not row:
+        raise HTTPException(404, "session not found")
+    try:
+        gaze = json.loads(row["screen_gaze_json"] or "[]")
+    except (ValueError, TypeError):
+        gaze = []
+    return {"screen_recording_url": row["screen_recording_url"], "gaze": gaze}
+
+
 @app.post("/api/session/{sess}/device")
 async def store_device(sess: str, req: Request):
     body = await req.json()
@@ -696,6 +737,7 @@ def list_sessions(sid: str):
     with db.get_conn() as conn:
         rows = conn.execute(
             "SELECT s.id AS session_id, s.participant_id, s.started_at, s.ended_at, s.status, "
+            "s.recording_url, s.screen_recording_url, "
             "q.quality_grade, q.valid_sample_pct, v.median_error_px "
             "FROM sessions s "
             "LEFT JOIN qa_reports q ON q.session_id=s.id "

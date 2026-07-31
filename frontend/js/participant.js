@@ -50,6 +50,7 @@
     $('consent-text').textContent = state.study.consent_text || '';
 
     state.recordSession = !!(state.study.config && state.study.config.record_session);
+    state.recordScreen = !!(state.study.config && state.study.config.record_screen);
     // When recording is enabled, require a SEPARATE explicit consent (PRD §14).
     if (state.recordSession) {
       const wrap = document.createElement('label');
@@ -800,9 +801,59 @@
   // ---- 6. stimulus block ----------------------------------------------
   function setupStimulus() {
     $('stim-begin').onclick = async () => {
+      // Screen-share MUST be requested inside the click gesture, BEFORE any await,
+      // or the browser rejects getDisplayMedia. Skips silently on phones/denied.
+      if (state.recordScreen) await startScreenRecording();
       try { await document.documentElement.requestFullscreen(); } catch (e) {}
       startStimulusBlock();
     };
+  }
+
+  // Screen recording of the whole study block + a screen-normalized gaze track for the
+  // replay overlay. Time-changing stimuli (scrolling websites, videos) can't be reduced
+  // to one static heatmap, so we capture what was actually on screen with gaze over time.
+  async function startScreenRecording() {
+    state.screenRec = null; state.screenGaze = [];
+    try {
+      const md = navigator.mediaDevices;
+      if (!md || !md.getDisplayMedia || typeof MediaRecorder === 'undefined') return; // mobile/unsupported
+      const stream = await md.getDisplayMedia({
+        video: { frameRate: { ideal: 15 } }, audio: false,
+        preferCurrentTab: true,            // Chrome hint: offer "this tab" first
+      });
+      const prefer = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+      const mime = prefer.find(m => MediaRecorder.isTypeSupported(m)) || '';
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 1200000 } : {});
+      const chunks = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.start(1000);
+      // If the participant stops sharing from the browser bar, just finalize gracefully.
+      stream.getVideoTracks().forEach(t => t.addEventListener('ended', () => { try { rec.stop(); } catch (e) {} }));
+      state.screenRec = { rec, chunks, stream, startMs: Date.now() };
+    } catch (e) {
+      console.warn('screen recording not started (non-fatal):', e && e.message);
+      state.screenRec = null;   // declined or unsupported — study continues normally
+    }
+  }
+
+  async function stopAndUploadScreenRecording() {
+    const sr = state.screenRec;
+    if (!sr) return;
+    state.screenRec = null;
+    try {
+      const blob = await new Promise((resolve) => {
+        sr.rec.onstop = () => resolve(new Blob(sr.chunks, { type: 'video/webm' }));
+        if (sr.rec.state !== 'inactive') { try { sr.rec.stop(); } catch (e) { resolve(null); } }
+        else resolve(new Blob(sr.chunks, { type: 'video/webm' }));
+      });
+      try { sr.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      if (blob && blob.size) {
+        const fd = new FormData();
+        fd.append('file', new File([blob], 'screen.webm', { type: 'video/webm' }));
+        fd.append('gaze_track', JSON.stringify(state.screenGaze || []));
+        await fetch(`/api/session/${state.sessionId}/screen-recording`, { method: 'POST', body: fd });
+      }
+    } catch (e) { console.warn('screen recording upload failed', e); }
   }
 
   function setupQueues() {
@@ -814,6 +865,16 @@
     // capture gaze into the queue, normalized to the current stimulus rect
     // (drift-corrected: state.gazeOffset is re-measured before every stimulus)
     state.engine.onGaze((g) => {
+      // Screen-replay track: gaze in SCREEN-normalized coords vs. the recording clock,
+      // independent of the per-stimulus rect (so it overlays the screen recording).
+      if (state.screenRec && g.x != null) {
+        const sx = (g.x + state.gazeOffset.dx) / window.innerWidth;
+        const sy = (g.y + state.gazeOffset.dy) / window.innerHeight;
+        if (sx >= -0.05 && sx <= 1.05 && sy >= -0.05 && sy <= 1.05) {
+          state.screenGaze.push([Date.now() - state.screenRec.startMs,
+            +sx.toFixed(4), +sy.toFixed(4)]);
+        }
+      }
       if (!state.capturing || !state.currentTrialId) return;
       let nx = null, ny = null, off = true;
       if (g.x != null && state.stimRect) {
@@ -1263,6 +1324,8 @@
         }
       } catch (e) { console.warn('recording upload failed', e); }
     }
+    // Finalize + upload the optional screen recording + gaze replay track.
+    await stopAndUploadScreenRecording();
     const survey = (state.study.config && state.study.config.survey) || [];
     if (survey.length) { setupSurvey(survey); show('survey-stage'); }
     else finishStudy();

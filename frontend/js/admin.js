@@ -189,6 +189,8 @@
 
     const recordChk = h('input', { type: 'checkbox', style: 'width:auto',
       ...(study.config && study.config.record_session ? { checked: 'checked' } : {}) });
+    const screenChk = h('input', { type: 'checkbox', style: 'width:auto',
+      ...(study.config && study.config.record_screen ? { checked: 'checked' } : {}) });
     const curEngine = (study.config && study.config.engine) || 'mediapipe';
     const engineSel = h('select', {},
       h('option', { value: 'mediapipe', ...(curEngine === 'mediapipe' ? { selected: 'selected' } : {}) },
@@ -211,6 +213,10 @@
         recordChk, 'Record participant webcam video (asks for separate consent; stored per session)'),
       h('p', { class: 'hint' },
         'Off by default. When on, participants must give an extra recording consent, and the webcam video is stored and viewable from each participant’s replay. Webcam frames are otherwise never stored.'),
+      h('label', { style: 'display:flex;align-items:center;gap:8px;margin-top:14px;color:var(--text)' },
+        screenChk, 'Record the screen + gaze replay (recommended for websites & videos)'),
+      h('p', { class: 'hint' },
+        'Captures what the participant actually saw (scrolling websites, playing videos) with a time-synced gaze overlay you can replay — the right tool when a static heatmap can’t capture a time-changing stimulus. Desktop only (the participant approves a one-time screen-share prompt); silently skipped on phones and if declined.'),
       h('div', { class: 'btn-row', style: 'margin-top:16px' },
         h('button', { class: 'btn', onclick: async () => {
           // Build survey JSON from the visual rows — auto-assign stable ids so
@@ -223,7 +229,8 @@
             title: title.value, description: desc.value, device_allowed: device.value,
             consent_text: consent.value,
             config: { ...(study.config || {}), survey: surveyJson,
-              record_session: recordChk.checked, engine: engineSel.value },
+              record_session: recordChk.checked, record_screen: screenChk.checked,
+              engine: engineSel.value },
           });
           toast('Saved'); openStudy(study.id, 'Build');
         } }, 'Save'),
@@ -530,6 +537,11 @@
         if (s) results.appendChild(h('div', { class: 'banner info' },
           `Single session — started ${fmtTime(s.started_at)}, ended ${fmtTime(s.ended_at)} · ` +
           `QA ${s.quality_grade || 'ungraded'}`));
+        // Screen recording + gaze replay (for time-changing stimuli).
+        if (s && s.screen_recording_url) {
+          try { results.appendChild(await gazeReplayPlayer(sessionId)); }
+          catch (e) { console.warn('replay load failed', e); }
+        }
       }
       for (const st of stimuli) results.appendChild(await stimulusResult(st, sessionId));
     }
@@ -609,6 +621,59 @@
     }
     wrap.appendChild(h('p', { class: 'hint' },
       '⚠ Interpret heatmaps alongside AOI metrics and behavioral outcomes — never alone (PRD §19).'));
+    return wrap;
+  }
+
+  // Gaze replay: plays the session screen recording with a time-synced gaze dot +
+  // trail overlaid — the right view for time-changing stimuli (scrolling sites, video).
+  async function gazeReplayPlayer(sessionId) {
+    const data = await API.get(`/api/session/${sessionId}/screen-replay`);
+    const wrap = h('div', { class: 'card', style: 'margin-bottom:18px' });
+    wrap.appendChild(h('h3', { style: 'color:var(--text);text-transform:none' },
+      '▶ Gaze replay — what they saw + where they looked'));
+    if (!data.screen_recording_url) {
+      wrap.appendChild(h('p', { class: 'muted' }, 'No screen recording for this session.'));
+      return wrap;
+    }
+    const gaze = (data.gaze || []).map(g => ({ t: g[0], x: g[1], y: g[2] }));
+    const holder = h('div', { style: 'position:relative;display:inline-block;max-width:100%' });
+    const video = h('video', { src: data.screen_recording_url, controls: 'controls',
+      style: 'max-width:100%;display:block;border-radius:8px;background:#000' });
+    const canvas = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
+    holder.appendChild(video); holder.appendChild(canvas);
+    wrap.appendChild(holder);
+    wrap.appendChild(h('p', { class: 'hint' },
+      `${gaze.length} gaze points · red ring = current gaze, blue trail = last ~1.5 s. Scrub the video to any moment.`));
+
+    const ctx = canvas.getContext('2d');
+    let raf = null;
+    function drawOnce() {
+      const w = video.clientWidth, hh = video.clientHeight;
+      if (w && hh && (canvas.width !== w || canvas.height !== hh)) { canvas.width = w; canvas.height = hh; }
+      if (!canvas.width) return;
+      const tms = video.currentTime * 1000;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const recent = gaze.filter(g => g.t <= tms && g.t >= tms - 1500);
+      for (const g of recent) {
+        const age = (tms - g.t) / 1500;                 // 0 newest .. 1 oldest
+        const px = g.x * canvas.width, py = g.y * canvas.height;
+        ctx.beginPath();
+        ctx.arc(px, py, 3 + 6 * (1 - age), 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(79,156,249,${0.08 + 0.32 * (1 - age)})`;
+        ctx.fill();
+      }
+      const cur = recent.length ? recent[recent.length - 1] : null;
+      if (cur) {
+        const px = cur.x * canvas.width, py = cur.y * canvas.height;
+        ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,60,0,0.9)'; ctx.lineWidth = 3; ctx.stroke();
+      }
+    }
+    function loop() { drawOnce(); raf = (!video.paused && !video.ended) ? requestAnimationFrame(loop) : null; }
+    video.addEventListener('play', () => { if (!raf) loop(); });
+    video.addEventListener('seeked', drawOnce);
+    video.addEventListener('timeupdate', () => { if (video.paused) drawOnce(); });
+    video.addEventListener('loadeddata', drawOnce);
     return wrap;
   }
 

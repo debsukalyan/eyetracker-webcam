@@ -214,6 +214,12 @@ if USE_PG:
 _MIGRATIONS = [
     ("sessions", "recording_url", "TEXT"),
     ("participants", "recording_consented", "INTEGER DEFAULT 0"),
+    # Screen recording of the study (captures scrolling websites / playing videos as
+    # the participant actually saw them) + a time-synced screen-normalized gaze track
+    # for the replay overlay. For time-changing stimuli where a static heatmap can't
+    # capture the whole picture.
+    ("sessions", "screen_recording_url", "TEXT"),
+    ("sessions", "screen_gaze_json", "TEXT"),
 ]
 
 
