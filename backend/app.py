@@ -121,6 +121,42 @@ async def update_study(sid: str, req: Request):
     return get_study(sid)
 
 
+@app.delete("/api/studies/{sid}")
+def delete_study(sid: str):
+    """Delete a study and everything under it (stimuli, AOIs, participants, sessions,
+    gaze, fixations, events, responses, QA, exports). Irreversible."""
+    with db.get_conn() as conn:
+        if not conn.execute("SELECT id FROM studies WHERE id=?", (sid,)).fetchone():
+            raise HTTPException(404, "study not found")
+        sess_ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM sessions WHERE study_id=?", (sid,)).fetchall()]
+        trial_ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM trials WHERE session_id IN "
+            "(SELECT id FROM sessions WHERE study_id=?)", (sid,)).fetchall()]
+
+        def _del_in(table, col, ids):
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                ph = ",".join(["?"] * len(chunk))
+                conn.execute(f"DELETE FROM {table} WHERE {col} IN ({ph})", chunk)
+
+        if trial_ids:
+            _del_in("fixations", "trial_id", trial_ids)
+        if sess_ids:
+            for t in ("gaze_samples", "events", "responses", "qa_reports",
+                      "validations", "calibrations", "trials"):
+                _del_in(t, "session_id", sess_ids)
+        conn.execute("DELETE FROM aois WHERE stimulus_id IN "
+                     "(SELECT id FROM stimuli WHERE study_id=?)", (sid,))
+        conn.execute("DELETE FROM stimuli WHERE study_id=?", (sid,))
+        conn.execute("DELETE FROM sessions WHERE study_id=?", (sid,))
+        conn.execute("DELETE FROM participants WHERE study_id=?", (sid,))
+        conn.execute("DELETE FROM study_conditions WHERE study_id=?", (sid,))
+        conn.execute("DELETE FROM exports WHERE study_id=?", (sid,))
+        conn.execute("DELETE FROM studies WHERE id=?", (sid,))
+    return {"ok": True, "deleted": sid}
+
+
 def _study_counts(conn, sid):
     total = conn.execute(
         "SELECT COUNT(*) c FROM participants WHERE study_id=?", (sid,)).fetchone()["c"]

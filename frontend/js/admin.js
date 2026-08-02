@@ -244,6 +244,11 @@
               await API.patch('/api/studies/' + study.id, { status: 'closed' });
               toast('Study closed'); openStudy(study.id, 'Build');
             } }, 'Close study'),
+        h('button', { class: 'btn danger', style: 'margin-left:auto', onclick: async () => {
+          if (!confirm(`Delete study "${study.title}" and ALL its data (stimuli, participants, sessions, results)? This cannot be undone.`)) return;
+          try { await API.del('/api/studies/' + study.id); toast('Study deleted'); renderList(); }
+          catch (e) { toast('Delete failed: ' + e.message); }
+        } }, 'Delete study'),
       )));
   }
 
