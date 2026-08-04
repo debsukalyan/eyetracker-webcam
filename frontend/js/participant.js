@@ -865,6 +865,16 @@
     // capture gaze into the queue, normalized to the current stimulus rect
     // (drift-corrected: state.gazeOffset is re-measured before every stimulus)
     state.engine.onGaze((g) => {
+      // Website scroll+gaze track: viewport-normalized gaze + the scroll offset at that
+      // instant, so the replay can reconstruct the scrolled view over time.
+      if (state.urlTrack && state.capturing && g.x != null) {
+        const ut = state.urlTrack;
+        const x = (g.x + state.gazeOffset.dx) / ut.vw, y = (g.y + state.gazeOffset.dy) / ut.vh;
+        if (x >= -0.05 && x <= 1.05 && y >= -0.05 && y <= 1.05) {
+          ut.track.push([Date.now() - ut.startMs, +x.toFixed(4), +y.toFixed(4),
+            Math.round(ut.scrollEl.scrollTop)]);
+        }
+      }
       // Screen-replay track: gaze in SCREEN-normalized coords vs. the recording clock,
       // independent of the per-stimulus rect (so it overlays the screen recording).
       if (state.screenRec && g.x != null) {
@@ -1161,8 +1171,7 @@
     const a = state.activeStim;
     if (!a) return;
     if (a.kind === 'url') {
-      const f = $('stimulus-frame');
-      Object.assign(f.style, { width: window.innerWidth + 'px', height: window.innerHeight + 'px' });
+      // Keep the tall scrolling frame as-is; just refresh the viewport rect for gaze.
       state.stimRect = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
     } else if (a.el) {
       const nw = a.kind === 'video' ? (a.el.videoWidth || 1280) : a.el.naturalWidth;
@@ -1192,6 +1201,16 @@
         state.activeStim = null;
         if (state.trialClock) { clearInterval(state.trialClock); state.trialClock = null; }
         state.capturing = false;
+        // Finalize a website scroll+gaze track (for the scroll-aware replay).
+        if (state.urlTrack) {
+          const ut = state.urlTrack; state.urlTrack = null;
+          if (state.urlCleanup) { try { state.urlCleanup(); } catch (e) {} state.urlCleanup = null; }
+          try {
+            await API.post(`/api/session/${state.sessionId}/page-track`, {
+              stimulus_id: ut.stim.id, viewport_w: ut.vw, viewport_h: ut.vh,
+              page_h: ut.pageH(), track: ut.track });
+          } catch (e) { console.warn('page-track upload failed', e); }
+        }
         await API.patch(`/api/trial/${trial.trial_id}`, { offset_ts: Date.now() });
         await state.gazeQueue.flush();
         resolve();
@@ -1202,17 +1221,40 @@
       };
 
       if (isUrl) {
-        // Live website: load in a full-viewport iframe, track gaze over the whole screen.
+        // Live website. A cross-origin iframe's OWN scroll is invisible to us, so instead
+        // we make the iframe TALL and let the STAGE scroll (trackable). The iframe gets
+        // pointer-events:none so touches/wheel scroll OUR container, not the site — and we
+        // record scrollTop + gaze over time for a scroll-aware replay. Grows on demand so
+        // the participant can reach lower content without a huge blank gap up front.
         const frame = $('stimulus-frame');
+        const stage = $('stimulus-stage');
         $('stimulus-img').style.display = 'none';
         $('stimulus-video').style.display = 'none';
         frame.style.display = 'block';
-        Object.assign(frame.style, { left: '0', top: '0',
-          width: window.innerWidth + 'px', height: window.innerHeight + 'px' });
-        state.stimRect = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+        const vw = window.innerWidth, vh = window.innerHeight;
+        let frameH = Math.round(vh * 3);
+        Object.assign(frame.style, { position: 'relative', left: '0', top: '0',
+          width: vw + 'px', height: frameH + 'px', pointerEvents: 'none' });
+        frame.setAttribute('scrolling', 'no');
+        stage.style.overflowY = 'auto';
+        stage.style.webkitOverflowScrolling = 'touch';
+        state.stimRect = { left: 0, top: 0, width: vw, height: vh };  // gaze vs. viewport
+        state.urlTrack = { stim, startMs: 0, vw, vh, track: [], scrollEl: stage,
+          pageH: () => frameH };
+        const onScroll = () => {   // grow so they can keep scrolling to lower content
+          if (stage.scrollTop + vh * 2 > frameH) { frameH += Math.round(vh * 2); frame.style.height = frameH + 'px'; }
+        };
+        stage.addEventListener('scroll', onScroll, { passive: true });
+        state.urlCleanup = () => {
+          stage.removeEventListener('scroll', onScroll);
+          stage.style.overflowY = ''; stage.scrollTop = 0;
+          frame.removeAttribute('scrolling');
+          Object.assign(frame.style, { position: 'absolute', pointerEvents: '', height: vh + 'px' });
+        };
         let started = false;
         const start = () => {
           if (started) return; started = true;
+          state.urlTrack.startMs = Date.now();
           beginCapture();
           runTrialClock((stim.duration_ms && stim.duration_ms > 0) ? stim.duration_ms : 15000,
             null, finishTrial);

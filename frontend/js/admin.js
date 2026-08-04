@@ -548,32 +548,62 @@
           catch (e) { console.warn('replay load failed', e); }
         }
       }
-      for (const st of stimuli) results.appendChild(await stimulusResult(st, sessionId));
+      const ctx = { sess: sessionId ? sessions.find(x => x.session_id === sessionId) : null,
+        allowMobile: (study.device_allowed || 'desktop') !== 'desktop' };
+      for (const st of stimuli) results.appendChild(await stimulusResult(st, sessionId, ctx));
     }
     selector.addEventListener('change', () => renderResults(selector.value));
     renderResults('');
   }
 
-  async function stimulusResult(st, sessionId) {
+  async function stimulusResult(st, sessionId, ctx) {
+    ctx = ctx || {};
     const q = sessionId ? `?session=${encodeURIComponent(sessionId)}` : '';
     const data = await API.get(`/api/stimuli/${st.id}/analysis${q}`);
     const wrap = h('div', { class: 'card', style: 'margin-bottom:18px' });
     wrap.appendChild(h('h3', { style: 'color:var(--text);text-transform:none' },
       sessionId ? 'Stimulus · selected session'
                 : `Stimulus · ${data.n_sessions} usable session(s)`));
+    // Website scroll-aware replay depends on the page-track, NOT on fixations, so check
+    // it BEFORE the fixation-based "no usable data" gate (a website session can have a
+    // full scroll+gaze track even if I-DT found no fixations).
+    if (st.type === 'url' && sessionId) {
+      const replay = await websiteScrollReplay(st, sessionId).catch(() => null);
+      if (replay) {
+        wrap.appendChild(h('p', { class: 'hint' },
+          h('span', {}, 'Website: '),
+          h('a', { href: st.file_url, target: '_blank', class: 'mono', style: 'color:var(--accent)' }, st.file_url)));
+        wrap.appendChild(replay);
+        return wrap;
+      }
+    }
     if (data.n_sessions === 0) {
       wrap.appendChild(h('p', { class: 'muted' }, 'No usable gaze data yet for this stimulus.'));
       return wrap;
     }
-    // Website stimulus: cross-origin, can't be captured to a canvas, so show the
-    // gaze heatmap on a blank viewport-shaped panel with a link to the site.
+    // Website stimulus: embed the LIVE site as the anchor behind the heatmap. Works on
+    // any participant device (unlike screen recording, which needs desktop getDisplayMedia)
+    // as long as the site allows embedding — which it must, or it couldn't be a stimulus.
     if (st.type === 'url') {
+      // (Single-session scroll replay already handled above.) Static anchor + viewport
+      // heatmap for the aggregate view or a session without a scroll track.
       wrap.appendChild(h('p', { class: 'hint' },
         h('span', {}, 'Website: '),
         h('a', { href: st.file_url, target: '_blank', class: 'mono', style: 'color:var(--accent)' }, st.file_url)));
-      const holder = h('div', { style: 'position:relative;width:100%;max-width:640px;aspect-ratio:16/9;background:var(--panel-2);border:1px solid var(--border);border-radius:8px' });
+      // Match the participant's screen aspect when a single session is selected, else
+      // use a phone frame for mobile-allowed studies (so the site renders its mobile
+      // layout, matching what the participant saw) or landscape for desktop-only.
+      const s = ctx.sess;
+      let aw = 16, ah = 9;
+      if (s && s.screen_width && s.screen_height) { aw = s.screen_width; ah = s.screen_height; }
+      else if (ctx.allowMobile) { aw = 390; ah = 780; }
+      const portrait = ah > aw;
+      const maxW = portrait ? 380 : 680;
+      const holder = h('div', { style: `position:relative;width:100%;max-width:${maxW}px;aspect-ratio:${aw}/${ah};border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff` });
+      const frame = h('iframe', { src: st.file_url, referrerpolicy: 'no-referrer',
+        style: 'position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none' });
       const canvas = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
-      holder.appendChild(canvas);
+      holder.appendChild(frame); holder.appendChild(canvas);
       wrap.appendChild(holder);
       const drawWhenSized = () => {
         const w = holder.clientWidth, hh = holder.clientHeight;
@@ -582,7 +612,8 @@
         try { drawHeatmap(canvas, data.heatmap_points); } catch (e) { console.warn('heatmap draw failed', e); }
       };
       requestAnimationFrame(drawWhenSized);
-      wrap.appendChild(h('p', { class: 'hint' }, 'Heatmap shows where gaze concentrated on screen (relative to the full viewport).'));
+      wrap.appendChild(h('p', { class: 'hint' },
+        'The live site is shown as the anchor. If the participant scrolled, the heatmap reflects on-screen gaze and may not line up with scrolled content — enable screen recording (desktop) for scroll-accurate replay.'));
       return wrap;
     }
     // heatmap canvas over the stimulus (image or video frame)
@@ -606,6 +637,11 @@
     media.addEventListener(isVideo ? 'loadeddata' : 'load', () => requestAnimationFrame(sizeAndDraw));
     if (!isVideo && media.complete && media.naturalWidth) requestAnimationFrame(sizeAndDraw);
     wrap.appendChild(holder);
+
+    // Video + a single session → time-synced gaze replay (dot follows the video).
+    if (isVideo && sessionId) {
+      try { wrap.appendChild(await videoGazeReplay(st, sessionId)); } catch (e) { console.warn('video replay failed', e); }
+    }
 
     // AOI table
     if (data.aoi_summary.length) {
@@ -680,6 +716,109 @@
     video.addEventListener('timeupdate', () => { if (video.paused) drawOnce(); });
     video.addEventListener('loadeddata', drawOnce);
     return wrap;
+  }
+
+  // Time-synced gaze replay over a stored VIDEO stimulus for one session: the gaze dot
+  // follows the participant's gaze as the video plays (no screen recording needed — we
+  // already have the video + timestamped gaze).
+  async function videoGazeReplay(st, sessionId) {
+    const data = await API.get(`/api/session/${sessionId}/stimulus/${st.id}/gaze-track`);
+    const gaze = (data.gaze || []).map(g => ({ t: g[0], x: g[1], y: g[2] }));
+    const box = h('div', { style: 'margin-top:14px' });
+    box.appendChild(h('h4', { style: 'color:var(--text);margin:0 0 8px' }, '▶ Gaze replay (synced to video)'));
+    if (!gaze.length) { box.appendChild(h('p', { class: 'hint' }, 'No gaze samples for this session/stimulus.')); return box; }
+    const holder = h('div', { style: 'position:relative;display:inline-block;max-width:100%' });
+    const video = h('video', { src: st.file_url, controls: 'controls',
+      style: 'max-width:100%;display:block;border-radius:8px;background:#000' });
+    const canvas = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
+    holder.appendChild(video); holder.appendChild(canvas);
+    box.appendChild(holder);
+    box.appendChild(h('p', { class: 'hint' }, `${gaze.length} gaze points · red ring follows their gaze; blue trail = last ~1.2 s. Play or scrub the video.`));
+    const ctx = canvas.getContext('2d');
+    let raf = null;
+    function drawOnce() {
+      const w = video.clientWidth, hh = video.clientHeight;
+      if (w && hh && (canvas.width !== w || canvas.height !== hh)) { canvas.width = w; canvas.height = hh; }
+      if (!canvas.width) return;
+      const tms = video.currentTime * 1000;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const recent = gaze.filter(g => g.t <= tms && g.t >= tms - 1200);
+      for (const g of recent) {
+        const age = (tms - g.t) / 1200;
+        const px = g.x * canvas.width, py = g.y * canvas.height;
+        ctx.beginPath(); ctx.arc(px, py, 3 + 6 * (1 - age), 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(79,156,249,${0.08 + 0.30 * (1 - age)})`; ctx.fill();
+      }
+      const cur = recent.length ? recent[recent.length - 1] : null;
+      if (cur) {
+        const px = cur.x * canvas.width, py = cur.y * canvas.height;
+        ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,60,0,0.9)'; ctx.lineWidth = 3; ctx.stroke();
+      }
+    }
+    function loop() { drawOnce(); raf = (!video.paused && !video.ended) ? requestAnimationFrame(loop) : null; }
+    video.addEventListener('play', () => { if (!raf) loop(); });
+    video.addEventListener('seeked', drawOnce);
+    video.addEventListener('timeupdate', () => { if (video.paused) drawOnce(); });
+    video.addEventListener('loadeddata', drawOnce);
+    return box;
+  }
+
+  // Scroll-aware gaze replay for a WEBSITE stimulus: reloads the site at the participant's
+  // viewport width and scrolls it exactly as they did over time, with their gaze dot on
+  // top. This is the correct view for scrolling sites (a static underlay can't capture
+  // "they read the top, then scrolled down"). Returns null if there's no track.
+  async function websiteScrollReplay(st, sessionId) {
+    const d = await API.get(`/api/session/${sessionId}/stimulus/${st.id}/page-track`);
+    const track = d.track || [];
+    if (!track.length) return null;
+    const vw = d.viewport_w || 390, vh = d.viewport_h || 780, pageH = d.page_h || vh * 3;
+    const box = h('div', { style: 'margin-top:6px' });
+    box.appendChild(h('h4', { style: 'color:var(--text);margin:0 0 8px' }, '▶ Scroll-aware gaze replay'));
+    const displayW = Math.min(vw, 380);
+    const scale = displayW / vw;
+    const displayH = Math.round(vh * scale);
+    const winEl = h('div', { style: `position:relative;width:${displayW}px;height:${displayH}px;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:#fff` });
+    const frame = h('iframe', { src: st.file_url, referrerpolicy: 'no-referrer', scrolling: 'no',
+      style: `position:absolute;top:0;left:0;width:${vw}px;height:${pageH}px;border:0;transform-origin:top left;pointer-events:none` });
+    const dot = h('div', { style: 'position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border:3px solid rgba(255,60,0,.9);border-radius:50%;box-shadow:0 0 0 2px rgba(0,0,0,.3);pointer-events:none' });
+    winEl.appendChild(frame); winEl.appendChild(dot);
+    box.appendChild(winEl);
+    const maxT = track[track.length - 1][0] || 1;
+    const slider = h('input', { type: 'range', min: '0', max: String(maxT), value: '0', step: '50',
+      style: 'width:' + displayW + 'px;display:block;margin-top:8px' });
+    const playBtn = h('button', { class: 'btn sm' }, '▶ Play');
+    const timeLbl = h('span', { class: 'muted', style: 'margin-left:10px' }, '0.0s');
+    box.appendChild(slider);
+    box.appendChild(h('div', { style: 'margin-top:6px;display:flex;align-items:center' }, playBtn, timeLbl));
+    box.appendChild(h('p', { class: 'hint' },
+      `${track.length} samples · the frame scrolls exactly as the participant did; the red ring is their gaze. Play or drag the slider.`));
+
+    function sampleAt(t) {
+      let lo = 0, hi = track.length - 1, idx = 0;
+      while (lo <= hi) { const mid = (lo + hi) >> 1; if (track[mid][0] <= t) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
+      return track[idx];
+    }
+    function render(t) {
+      const s = sampleAt(t);
+      frame.style.transform = `scale(${scale}) translateY(${-s[3]}px)`;
+      dot.style.left = (s[1] * displayW) + 'px';
+      dot.style.top = (s[2] * displayH) + 'px';
+      timeLbl.textContent = (t / 1000).toFixed(1) + 's';
+      slider.value = String(Math.round(t));
+    }
+    let raf = null, startWall = 0, startT = 0, playing = false;
+    function frameLoop() {
+      const t = startT + (performance.now() - startWall);
+      if (t >= maxT) { render(maxT); pause(); return; }
+      render(t); raf = requestAnimationFrame(frameLoop);
+    }
+    function play() { if (playing) return; playing = true; playBtn.textContent = '⏸ Pause'; startT = (+slider.value >= maxT ? 0 : +slider.value); startWall = performance.now(); raf = requestAnimationFrame(frameLoop); }
+    function pause() { playing = false; playBtn.textContent = '▶ Play'; if (raf) { cancelAnimationFrame(raf); raf = null; } }
+    playBtn.onclick = () => (playing ? pause() : play());
+    slider.oninput = () => { pause(); render(+slider.value); };
+    render(0);
+    return box;
   }
 
   function drawHeatmap(canvas, points) {

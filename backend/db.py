@@ -189,6 +189,15 @@ CREATE TABLE IF NOT EXISTS blobs (
     fname TEXT PRIMARY KEY, content_type TEXT, data {BLOB}, created_at INTEGER
 );
 
+-- Scroll+gaze track for WEBSITE stimuli: since a cross-origin site can't be pixel-
+-- captured (esp. on mobile, no getDisplayMedia), we record the participant's scroll
+-- offset + gaze over time so the researcher can replay the scrolled view faithfully.
+CREATE TABLE IF NOT EXISTS page_tracks (
+    session_id TEXT, stimulus_id TEXT, viewport_w INTEGER, viewport_h INTEGER,
+    page_h INTEGER, track_json TEXT, created_at INTEGER,
+    PRIMARY KEY (session_id, stimulus_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_gaze_trial ON gaze_samples(trial_id);
 CREATE INDEX IF NOT EXISTS idx_gaze_session ON gaze_samples(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);

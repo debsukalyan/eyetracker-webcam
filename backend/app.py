@@ -436,6 +436,44 @@ async def store_screen_recording(sess: str, file: UploadFile = File(...),
     return {"ok": True, "screen_recording_url": f"/storage/{fname}"}
 
 
+@app.post("/api/session/{sess}/page-track")
+async def store_page_track(sess: str, req: Request):
+    """Scroll+gaze track for a WEBSITE stimulus: viewport size, total scrolled page
+    height, and track = [[t_ms_from_onset, x, y, scrollY_px], ...] (x,y normalized to
+    the viewport 0..1). Powers the scroll-aware gaze replay."""
+    body = await req.json()
+    stid = body.get("stimulus_id")
+    if not stid:
+        raise HTTPException(400, "stimulus_id required")
+    track = json.dumps(body.get("track", []))
+    with db.get_conn() as conn:
+        if not conn.execute("SELECT id FROM sessions WHERE id=?", (sess,)).fetchone():
+            raise HTTPException(404, "session not found")
+        conn.execute("DELETE FROM page_tracks WHERE session_id=? AND stimulus_id=?", (sess, stid))
+        conn.execute(
+            "INSERT INTO page_tracks (session_id,stimulus_id,viewport_w,viewport_h,page_h,"
+            "track_json,created_at) VALUES (?,?,?,?,?,?,?)",
+            (sess, stid, int(body.get("viewport_w") or 0), int(body.get("viewport_h") or 0),
+             int(body.get("page_h") or 0), track, now_ms()))
+    return {"ok": True, "points": len(body.get("track", []))}
+
+
+@app.get("/api/session/{sess}/stimulus/{stid}/page-track")
+def get_page_track(sess: str, stid: str):
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT viewport_w,viewport_h,page_h,track_json FROM page_tracks "
+            "WHERE session_id=? AND stimulus_id=?", (sess, stid)).fetchone()
+    if not row:
+        return {"viewport_w": 0, "viewport_h": 0, "page_h": 0, "track": []}
+    try:
+        track = json.loads(row["track_json"] or "[]")
+    except (ValueError, TypeError):
+        track = []
+    return {"viewport_w": row["viewport_w"], "viewport_h": row["viewport_h"],
+            "page_h": row["page_h"], "track": track}
+
+
 @app.get("/api/session/{sess}/screen-replay")
 def get_screen_replay(sess: str):
     """Replay payload: the screen recording URL + the synced gaze track."""
@@ -773,7 +811,7 @@ def list_sessions(sid: str):
     with db.get_conn() as conn:
         rows = conn.execute(
             "SELECT s.id AS session_id, s.participant_id, s.started_at, s.ended_at, s.status, "
-            "s.recording_url, s.screen_recording_url, "
+            "s.recording_url, s.screen_recording_url, s.screen_width, s.screen_height, "
             "q.quality_grade, q.valid_sample_pct, v.median_error_px "
             "FROM sessions s "
             "LEFT JOIN qa_reports q ON q.session_id=s.id "
@@ -781,6 +819,27 @@ def list_sessions(sid: str):
             "WHERE s.study_id=? AND s.status='complete' "
             "ORDER BY s.ended_at DESC", (sid,)).fetchall()
         return {"sessions": [dict(r) for r in rows]}
+
+
+@app.get("/api/session/{sess}/stimulus/{stid}/gaze-track")
+def stimulus_gaze_track(sess: str, stid: str):
+    """Per-session gaze over time for ONE stimulus, for the video/website gaze replay:
+    [[t_ms_from_stimulus_onset, x, y], ...] with x,y normalized to the stimulus rect
+    (0..1). Lets the researcher scrub a stored video with a synced gaze dot."""
+    with db.get_conn() as conn:
+        tr = conn.execute(
+            "SELECT id, onset_ts FROM trials WHERE session_id=? AND stimulus_id=? "
+            "ORDER BY trial_index LIMIT 1", (sess, stid)).fetchone()
+        if not tr:
+            return {"onset_ts": None, "gaze": []}
+        onset = tr["onset_ts"] or 0
+        rows = conn.execute(
+            "SELECT timestamp_ms, raw_x, raw_y FROM gaze_samples "
+            "WHERE trial_id=? AND raw_x IS NOT NULL AND face_present=1 AND offscreen=0 "
+            "ORDER BY timestamp_ms", (tr["id"],)).fetchall()
+    gaze = [[max(0, (r["timestamp_ms"] or 0) - onset), round(r["raw_x"], 4), round(r["raw_y"], 4)]
+            for r in rows]
+    return {"onset_ts": onset, "gaze": gaze}
 
 
 @app.get("/api/stimuli/{stid}/analysis")
