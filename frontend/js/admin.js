@@ -730,37 +730,41 @@
     const holder = h('div', { style: 'position:relative;display:inline-block;max-width:100%' });
     const video = h('video', { src: st.file_url, controls: 'controls',
       style: 'max-width:100%;display:block;border-radius:8px;background:#000' });
+    const heatC = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
     const canvas = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
-    holder.appendChild(video); holder.appendChild(canvas);
+    holder.appendChild(video); holder.appendChild(heatC); holder.appendChild(canvas);
     box.appendChild(holder);
-    box.appendChild(h('p', { class: 'hint' }, `${gaze.length} gaze points · red ring follows their gaze; blue trail = last ~1.2 s. Play or scrub the video.`));
-    const ctx = canvas.getContext('2d');
-    let raf = null;
+    // overlay toggles
+    const cb = (label, on) => { const i = h('input', { type: 'checkbox', style: 'width:auto;margin:0 4px 0 12px', ...(on ? { checked: 'checked' } : {}) }); return { i, wrap: h('label', { style: 'color:var(--muted);display:inline-flex;align-items:center' }, i, label) }; };
+    const tDot = cb('Gaze', true), tPath = cb('Scanpath', true), tHeat = cb('Heatmap', false);
+    box.appendChild(h('div', { style: 'margin-top:8px' }, tDot.wrap, tPath.wrap, tHeat.wrap));
+    box.appendChild(h('p', { class: 'hint' }, `${gaze.length} gaze points · scanpath lines are saccades (jumps) between fixations; heatmap builds up as it plays. Play or scrub.`));
+    const ctx = canvas.getContext('2d'), hctx = heatC.getContext('2d');
+    let raf = null, lastHeatMs = -1e9;
+    function sync(c) { const w = video.clientWidth, hh = video.clientHeight; if (w && hh && (c.width !== w || c.height !== hh)) { c.width = w; c.height = hh; } return c.width; }
     function drawOnce() {
-      const w = video.clientWidth, hh = video.clientHeight;
-      if (w && hh && (canvas.width !== w || canvas.height !== hh)) { canvas.width = w; canvas.height = hh; }
-      if (!canvas.width) return;
-      const tms = video.currentTime * 1000;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const recent = gaze.filter(g => g.t <= tms && g.t >= tms - 1200);
-      for (const g of recent) {
-        const age = (tms - g.t) / 1200;
-        const px = g.x * canvas.width, py = g.y * canvas.height;
-        ctx.beginPath(); ctx.arc(px, py, 3 + 6 * (1 - age), 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(79,156,249,${0.08 + 0.30 * (1 - age)})`; ctx.fill();
+      if (!sync(canvas)) return; sync(heatC);
+      const W = canvas.width, H = canvas.height, tms = video.currentTime * 1000;
+      ctx.clearRect(0, 0, W, H);
+      const recent = gaze.filter(g => g.t <= tms && g.t >= tms - 1600);
+      if (tPath.i.checked) paintScanpath(ctx, recent, W, H);
+      if (tHeat.i.checked && Math.abs(tms - lastHeatMs) > 150) {
+        lastHeatMs = tms;
+        paintHeatSoft(hctx, gaze.filter(g => g.t <= tms), W, H);   // cumulative → "forms"
       }
+      if (!tHeat.i.checked) hctx.clearRect(0, 0, heatC.width, heatC.height);
       const cur = recent.length ? recent[recent.length - 1] : null;
-      if (cur) {
-        const px = cur.x * canvas.width, py = cur.y * canvas.height;
-        ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255,60,0,0.9)'; ctx.lineWidth = 3; ctx.stroke();
+      if (tDot.i.checked && cur) {
+        ctx.beginPath(); ctx.arc(cur.x * W, cur.y * H, 12, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,60,0,0.95)'; ctx.lineWidth = 3; ctx.stroke();
       }
     }
     function loop() { drawOnce(); raf = (!video.paused && !video.ended) ? requestAnimationFrame(loop) : null; }
     video.addEventListener('play', () => { if (!raf) loop(); });
-    video.addEventListener('seeked', drawOnce);
+    video.addEventListener('seeked', () => { lastHeatMs = -1e9; drawOnce(); });
     video.addEventListener('timeupdate', () => { if (video.paused) drawOnce(); });
     video.addEventListener('loadeddata', drawOnce);
+    [tDot, tPath, tHeat].forEach(t => t.i.addEventListener('change', () => { lastHeatMs = -1e9; drawOnce(); }));
     return box;
   }
 
@@ -781,16 +785,22 @@
     const winEl = h('div', { style: `position:relative;width:${displayW}px;height:${displayH}px;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:#fff` });
     const frame = h('iframe', { src: st.file_url, referrerpolicy: 'no-referrer', scrolling: 'no',
       style: `position:absolute;top:0;left:0;width:${vw}px;height:${pageH}px;border:0;transform-origin:top left;pointer-events:none` });
+    const pathC = h('canvas', { width: String(displayW), height: String(displayH),
+      style: `position:absolute;inset:0;width:${displayW}px;height:${displayH}px;pointer-events:none` });
     const dot = h('div', { style: 'position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border:3px solid rgba(255,60,0,.9);border-radius:50%;box-shadow:0 0 0 2px rgba(0,0,0,.3);pointer-events:none' });
-    winEl.appendChild(frame); winEl.appendChild(dot);
+    winEl.appendChild(frame); winEl.appendChild(pathC); winEl.appendChild(dot);
     box.appendChild(winEl);
+    const pctx = pathC.getContext('2d');
+    const tPath = h('input', { type: 'checkbox', style: 'width:auto;margin:0 4px 0 0', checked: 'checked' });
     const maxT = track[track.length - 1][0] || 1;
     const slider = h('input', { type: 'range', min: '0', max: String(maxT), value: '0', step: '50',
       style: 'width:' + displayW + 'px;display:block;margin-top:8px' });
     const playBtn = h('button', { class: 'btn sm' }, '▶ Play');
     const timeLbl = h('span', { class: 'muted', style: 'margin-left:10px' }, '0.0s');
     box.appendChild(slider);
-    box.appendChild(h('div', { style: 'margin-top:6px;display:flex;align-items:center' }, playBtn, timeLbl));
+    box.appendChild(h('div', { style: 'margin-top:6px;display:flex;align-items:center' }, playBtn, timeLbl,
+      h('label', { style: 'color:var(--muted);display:inline-flex;align-items:center;margin-left:14px' }, tPath, 'Scanpath')));
+    tPath.addEventListener('change', () => render(+slider.value));
     box.appendChild(h('p', { class: 'hint' },
       `${track.length} samples · the frame scrolls exactly as the participant did; the red ring is their gaze. Play or drag the slider.`));
 
@@ -804,6 +814,14 @@
       frame.style.transform = `scale(${scale}) translateY(${-s[3]}px)`;
       dot.style.left = (s[1] * displayW) + 'px';
       dot.style.top = (s[2] * displayH) + 'px';
+      // scanpath of the recent ~1.5 s (only points at a similar scroll offset, so the
+      // saccade lines reflect on-screen movement, not the scroll jump itself)
+      pctx.clearRect(0, 0, displayW, displayH);
+      if (tPath.checked) {
+        const recent = track.filter(p => p[0] <= t && p[0] >= t - 1500 && Math.abs(p[3] - s[3]) < vh * 0.5)
+          .map(p => ({ x: p[1], y: p[2] }));
+        paintScanpath(pctx, recent, displayW, displayH);
+      }
       timeLbl.textContent = (t / 1000).toFixed(1) + 's';
       slider.value = String(Math.round(t));
     }
@@ -819,6 +837,37 @@
     slider.oninput = () => { pause(); render(+slider.value); };
     render(0);
     return box;
+  }
+
+  // Scanpath: connect successive gaze points in order — the long segments ARE the
+  // saccades (the "jumps"), the clustered nodes are fixations. pts: {x,y} normalized.
+  function paintScanpath(ctx, pts, W, H) {
+    if (!pts.length) return;
+    ctx.save();
+    if (pts.length >= 2) {
+      ctx.strokeStyle = 'rgba(79,156,249,0.85)'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(pts[0].x * W, pts[0].y * H);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x * W, pts[i].y * H);
+      ctx.stroke();
+    }
+    for (const p of pts) {
+      ctx.beginPath(); ctx.arc(p.x * W, p.y * H, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(79,156,249,0.9)'; ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Cheap additive heatmap for animated overlays (radial gradients — fast per frame).
+  function paintHeatSoft(ctx, pts, W, H) {
+    const r = Math.max(26, W * 0.06);
+    ctx.clearRect(0, 0, W, H);
+    for (const p of pts) {
+      if (p.x == null) continue;
+      const px = p.x * W, py = p.y * H;
+      const g = ctx.createRadialGradient(px, py, 0, px, py, r);
+      g.addColorStop(0, 'rgba(255,70,0,0.10)'); g.addColorStop(1, 'rgba(255,70,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+    }
   }
 
   function drawHeatmap(canvas, points) {
