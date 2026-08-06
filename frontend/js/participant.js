@@ -1221,45 +1221,55 @@
       };
 
       if (isUrl) {
-        // Live website. A cross-origin iframe's OWN scroll is invisible to us, so instead
-        // we make the iframe TALL and let the STAGE scroll (trackable). The iframe gets
-        // pointer-events:none so touches/wheel scroll OUR container, not the site — and we
-        // record scrollTop + gaze over time for a scroll-aware replay. Grows on demand so
-        // the participant can reach lower content without a huge blank gap up front.
         const frame = $('stimulus-frame');
         const stage = $('stimulus-stage');
         $('stimulus-img').style.display = 'none';
         $('stimulus-video').style.display = 'none';
         frame.style.display = 'block';
         const vw = window.innerWidth, vh = window.innerHeight;
-        let frameH = Math.round(vh * 3);
-        Object.assign(frame.style, { position: 'relative', left: '0', top: '0',
-          width: vw + 'px', height: frameH + 'px', pointerEvents: 'none' });
-        frame.setAttribute('scrolling', 'no');
-        stage.style.overflowY = 'auto';
-        stage.style.webkitOverflowScrolling = 'touch';
-        state.stimRect = { left: 0, top: 0, width: vw, height: vh };  // gaze vs. viewport
-        state.urlTrack = { stim, startMs: 0, vw, vh, track: [], scrollEl: stage,
-          pageH: () => frameH };
-        const onScroll = () => {   // grow so they can keep scrolling to lower content
-          if (stage.scrollTop + vh * 2 > frameH) { frameH += Math.round(vh * 2); frame.style.height = frameH + 'px'; }
-        };
-        stage.addEventListener('scroll', onScroll, { passive: true });
-        state.urlCleanup = () => {
-          stage.removeEventListener('scroll', onScroll);
-          stage.style.overflowY = ''; stage.scrollTop = 0;
+        state.stimRect = { left: 0, top: 0, width: vw, height: vh };  // gaze vs. viewport (both modes)
+        state.activeStim = { kind: 'url' };
+        // iOS (all iOS browsers are WebKit) can't reliably render a TALL cross-origin
+        // iframe inside a scrolling container — it blanks out, so the website "wasn't
+        // opening" on iPhone. Give iOS a plain full-viewport iframe with the SITE's own
+        // internal scroll (reliable). Scroll offset isn't trackable cross-origin there,
+        // so iOS sessions get gaze-over-viewport (static heatmap) but no scroll replay.
+        const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        if (isIOS) {
+          Object.assign(frame.style, { position: 'absolute', left: '0', top: '0',
+            width: vw + 'px', height: vh + 'px', pointerEvents: 'auto' });
           frame.removeAttribute('scrolling');
-          Object.assign(frame.style, { position: 'absolute', pointerEvents: '', height: vh + 'px' });
-        };
+        } else {
+          // Non-iOS: tall iframe + the STAGE scrolls (trackable). pointer-events:none so
+          // touches scroll OUR container, not the cross-origin site. Grows on demand.
+          let frameH = Math.round(vh * 3);
+          Object.assign(frame.style, { position: 'relative', left: '0', top: '0',
+            width: vw + 'px', height: frameH + 'px', pointerEvents: 'none' });
+          frame.setAttribute('scrolling', 'no');
+          stage.style.overflowY = 'auto';
+          stage.style.webkitOverflowScrolling = 'touch';
+          state.urlTrack = { stim, startMs: 0, vw, vh, track: [], scrollEl: stage,
+            pageH: () => frameH };
+          const onScroll = () => {
+            if (stage.scrollTop + vh * 2 > frameH) { frameH += Math.round(vh * 2); frame.style.height = frameH + 'px'; }
+          };
+          stage.addEventListener('scroll', onScroll, { passive: true });
+          state.urlCleanup = () => {
+            stage.removeEventListener('scroll', onScroll);
+            stage.style.overflowY = ''; stage.scrollTop = 0;
+            frame.removeAttribute('scrolling');
+            Object.assign(frame.style, { position: 'absolute', pointerEvents: '', height: vh + 'px' });
+          };
+        }
         let started = false;
         const start = () => {
           if (started) return; started = true;
-          state.urlTrack.startMs = Date.now();
+          if (state.urlTrack) state.urlTrack.startMs = Date.now();
           beginCapture();
           runTrialClock((stim.duration_ms && stim.duration_ms > 0) ? stim.duration_ms : 15000,
             null, finishTrial);
         };
-        state.activeStim = { kind: 'url' };
         frame.onload = start;
         frame.src = stim.file_url;
         // Sites that block embedding (X-Frame-Options) never fire onload — start anyway.
