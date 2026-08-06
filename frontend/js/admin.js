@@ -680,41 +680,65 @@
     const holder = h('div', { style: 'position:relative;display:inline-block;max-width:100%' });
     const video = h('video', { src: data.screen_recording_url, controls: 'controls',
       style: 'max-width:100%;display:block;border-radius:8px;background:#000' });
+    const heatC = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
     const canvas = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
-    holder.appendChild(video); holder.appendChild(canvas);
+    holder.appendChild(video); holder.appendChild(heatC); holder.appendChild(canvas);
     wrap.appendChild(holder);
-    wrap.appendChild(h('p', { class: 'hint' },
-      `${gaze.length} gaze points · red ring = current gaze, blue trail = last ~1.5 s. Scrub the video to any moment.`));
-
-    const ctx = canvas.getContext('2d');
-    let raf = null;
-    function drawOnce() {
-      const w = video.clientWidth, hh = video.clientHeight;
-      if (w && hh && (canvas.width !== w || canvas.height !== hh)) { canvas.width = w; canvas.height = hh; }
-      if (!canvas.width) return;
-      const tms = video.currentTime * 1000;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const recent = gaze.filter(g => g.t <= tms && g.t >= tms - 1500);
-      for (const g of recent) {
-        const age = (tms - g.t) / 1500;                 // 0 newest .. 1 oldest
-        const px = g.x * canvas.width, py = g.y * canvas.height;
-        ctx.beginPath();
-        ctx.arc(px, py, 3 + 6 * (1 - age), 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(79,156,249,${0.08 + 0.32 * (1 - age)})`;
-        ctx.fill();
+    const cb = (label, on) => { const i = h('input', { type: 'checkbox', style: 'width:auto;margin:0 4px 0 12px', ...(on ? { checked: 'checked' } : {}) }); return { i, wrap: h('label', { style: 'color:var(--muted);display:inline-flex;align-items:center' }, i, label) }; };
+    const tDot = cb('Gaze', true), tPath = cb('Scanpath', true), tHeat = cb('Heatmap', false);
+    const overlayForBake = (c, W, H, tSec) => {
+      const tms = tSec * 1000;
+      if (tHeat.i.checked) paintHeatSoft(c, gaze.filter(g => g.t <= tms), W, H);
+      const recent = gaze.filter(g => g.t <= tms && g.t >= tms - 1600);
+      if (tPath.i.checked) paintScanpath(c, recent, W, H);
+      if (tDot.i.checked && recent.length) {
+        const cur = recent[recent.length - 1];
+        c.beginPath(); c.arc(cur.x * W, cur.y * H, 12, 0, Math.PI * 2);
+        c.strokeStyle = 'rgba(255,60,0,0.95)'; c.lineWidth = 3; c.stroke();
       }
+    };
+    const saveBtn = h('button', { class: 'btn sm', style: 'margin-left:12px' }, '⬇ Save replay video');
+    saveBtn.onclick = async () => {
+      const label = saveBtn.textContent; saveBtn.disabled = true; saveBtn.textContent = 'Rendering… 0%';
+      try {
+        const blob = await bakeReplayVideo(data.screen_recording_url, overlayForBake,
+          (p) => { saveBtn.textContent = `Rendering… ${Math.round(p * 100)}%`; });
+        downloadBlob(blob, `gaze-replay-${sessionId}.webm`);
+        toast('Saved — check your downloads');
+      } catch (e) { toast('Could not render: ' + e.message); }
+      saveBtn.disabled = false; saveBtn.textContent = label;
+    };
+    wrap.appendChild(h('div', { style: 'margin-top:8px;display:flex;align-items:center;flex-wrap:wrap' },
+      tDot.wrap, tPath.wrap, tHeat.wrap, saveBtn));
+    wrap.appendChild(h('p', { class: 'hint' },
+      `${gaze.length} gaze points · scanpath = saccade path, heatmap builds up over the recording. "Save replay video" bakes the overlays into a downloadable clip.`));
+
+    const ctx = canvas.getContext('2d'), hctx = heatC.getContext('2d');
+    let raf = null, lastHeatMs = -1e9;
+    function sync(c) { const w = video.clientWidth, hh = video.clientHeight; if (w && hh && (c.width !== w || c.height !== hh)) { c.width = w; c.height = hh; } return c.width; }
+    function drawOnce() {
+      if (!sync(canvas)) return; sync(heatC);
+      const W = canvas.width, H = canvas.height, tms = video.currentTime * 1000;
+      ctx.clearRect(0, 0, W, H);
+      const recent = gaze.filter(g => g.t <= tms && g.t >= tms - 1600);
+      if (tPath.i.checked) paintScanpath(ctx, recent, W, H);
+      if (tHeat.i.checked && Math.abs(tms - lastHeatMs) > 150) {
+        lastHeatMs = tms; hctx.clearRect(0, 0, heatC.width, heatC.height);
+        paintHeatSoft(hctx, gaze.filter(g => g.t <= tms), W, H);
+      }
+      if (!tHeat.i.checked) hctx.clearRect(0, 0, heatC.width, heatC.height);
       const cur = recent.length ? recent[recent.length - 1] : null;
-      if (cur) {
-        const px = cur.x * canvas.width, py = cur.y * canvas.height;
-        ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255,60,0,0.9)'; ctx.lineWidth = 3; ctx.stroke();
+      if (tDot.i.checked && cur) {
+        ctx.beginPath(); ctx.arc(cur.x * W, cur.y * H, 12, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,60,0,0.95)'; ctx.lineWidth = 3; ctx.stroke();
       }
     }
     function loop() { drawOnce(); raf = (!video.paused && !video.ended) ? requestAnimationFrame(loop) : null; }
     video.addEventListener('play', () => { if (!raf) loop(); });
-    video.addEventListener('seeked', drawOnce);
+    video.addEventListener('seeked', () => { lastHeatMs = -1e9; drawOnce(); });
     video.addEventListener('timeupdate', () => { if (video.paused) drawOnce(); });
     video.addEventListener('loadeddata', drawOnce);
+    [tDot, tPath, tHeat].forEach(t => t.i.addEventListener('change', () => { lastHeatMs = -1e9; drawOnce(); }));
     return wrap;
   }
 
@@ -737,8 +761,32 @@
     // overlay toggles
     const cb = (label, on) => { const i = h('input', { type: 'checkbox', style: 'width:auto;margin:0 4px 0 12px', ...(on ? { checked: 'checked' } : {}) }); return { i, wrap: h('label', { style: 'color:var(--muted);display:inline-flex;align-items:center' }, i, label) }; };
     const tDot = cb('Gaze', true), tPath = cb('Scanpath', true), tHeat = cb('Heatmap', false);
-    box.appendChild(h('div', { style: 'margin-top:8px' }, tDot.wrap, tPath.wrap, tHeat.wrap));
-    box.appendChild(h('p', { class: 'hint' }, `${gaze.length} gaze points · scanpath lines are saccades (jumps) between fixations; heatmap builds up as it plays. Play or scrub.`));
+    // Bake the current overlays (heatmap + scanpath + dot) onto the video → downloadable.
+    const overlayForBake = (ctx, W, H, tSec) => {
+      const tms = tSec * 1000;
+      if (tHeat.i.checked) paintHeatSoft(ctx, gaze.filter(g => g.t <= tms), W, H);
+      const recent = gaze.filter(g => g.t <= tms && g.t >= tms - 1600);
+      if (tPath.i.checked) paintScanpath(ctx, recent, W, H);
+      if (tDot.i.checked && recent.length) {
+        const c = recent[recent.length - 1];
+        ctx.beginPath(); ctx.arc(c.x * W, c.y * H, 12, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,60,0,0.95)'; ctx.lineWidth = 3; ctx.stroke();
+      }
+    };
+    const saveBtn = h('button', { class: 'btn sm', style: 'margin-left:12px' }, '⬇ Save replay video');
+    saveBtn.onclick = async () => {
+      const label = saveBtn.textContent; saveBtn.disabled = true; saveBtn.textContent = 'Rendering… 0%';
+      try {
+        const blob = await bakeReplayVideo(st.file_url, overlayForBake,
+          (p) => { saveBtn.textContent = `Rendering… ${Math.round(p * 100)}%`; });
+        downloadBlob(blob, `gaze-replay-${st.id}.webm`);
+        toast('Saved — check your downloads');
+      } catch (e) { toast('Could not render: ' + e.message); }
+      saveBtn.disabled = false; saveBtn.textContent = label;
+    };
+    box.appendChild(h('div', { style: 'margin-top:8px;display:flex;align-items:center;flex-wrap:wrap' },
+      tDot.wrap, tPath.wrap, tHeat.wrap, saveBtn));
+    box.appendChild(h('p', { class: 'hint' }, `${gaze.length} gaze points · scanpath lines are saccades (jumps) between fixations; heatmap builds up as it plays. "Save replay video" bakes the overlays into a downloadable clip.`));
     const ctx = canvas.getContext('2d'), hctx = heatC.getContext('2d');
     let raf = null, lastHeatMs = -1e9;
     function sync(c) { const w = video.clientWidth, hh = video.clientHeight; if (w && hh && (c.width !== w || c.height !== hh)) { c.width = w; c.height = hh; } return c.width; }
@@ -750,6 +798,7 @@
       if (tPath.i.checked) paintScanpath(ctx, recent, W, H);
       if (tHeat.i.checked && Math.abs(tms - lastHeatMs) > 150) {
         lastHeatMs = tms;
+        hctx.clearRect(0, 0, heatC.width, heatC.height);
         paintHeatSoft(hctx, gaze.filter(g => g.t <= tms), W, H);   // cumulative → "forms"
       }
       if (!tHeat.i.checked) hctx.clearRect(0, 0, heatC.width, heatC.height);
@@ -802,7 +851,9 @@
       h('label', { style: 'color:var(--muted);display:inline-flex;align-items:center;margin-left:14px' }, tPath, 'Scanpath')));
     tPath.addEventListener('change', () => render(+slider.value));
     box.appendChild(h('p', { class: 'hint' },
-      `${track.length} samples · the frame scrolls exactly as the participant did; the red ring is their gaze. Play or drag the slider.`));
+      `${track.length} samples · the frame scrolls exactly as the participant did; the red ring is their gaze, blue lines are saccades. Play or drag the slider.`));
+    box.appendChild(h('p', { class: 'hint' },
+      'Note: this replay reconstructs a live third-party site, so it can’t be baked into a downloadable file (the browser forbids capturing cross-origin pixels). To get a saveable video-with-overlays of a website, run that session on desktop with screen recording enabled.'));
 
     function sampleAt(t) {
       let lo = 0, hi = track.length - 1, idx = 0;
@@ -858,9 +909,9 @@
   }
 
   // Cheap additive heatmap for animated overlays (radial gradients — fast per frame).
+  // Does NOT clear — the caller clears its own layer (live) or draws over a frame (bake).
   function paintHeatSoft(ctx, pts, W, H) {
     const r = Math.max(26, W * 0.06);
-    ctx.clearRect(0, 0, W, H);
     for (const p of pts) {
       if (p.x == null) continue;
       const px = p.x * W, py = p.y * H;
@@ -868,6 +919,49 @@
       g.addColorStop(0, 'rgba(255,70,0,0.10)'); g.addColorStop(1, 'rgba(255,70,0,0)');
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
     }
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 1000);
+  }
+
+  // Bake a replay to a downloadable webm: plays a SAME-ORIGIN video (our stored stimulus
+  // or screen recording) into an offscreen canvas, calls drawFrame(ctx,W,H,tSec) to stamp
+  // the heatmap/scanpath/dot on each frame, and records the canvas via MediaRecorder.
+  // (Cross-origin website iframes can't be baked — the browser forbids reading their
+  // pixels — so this is offered only for video-backed replays.)
+  async function bakeReplayVideo(srcUrl, drawFrame, onProgress) {
+    if (typeof MediaRecorder === 'undefined') throw new Error('recording not supported in this browser');
+    const v = document.createElement('video');
+    v.src = srcUrl; v.muted = true; v.playsInline = true;
+    await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error('could not load the video')); });
+    const W = v.videoWidth || 1280, H = v.videoHeight || 720, dur = v.duration || 0;
+    const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const stream = canvas.captureStream(30);
+    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 4000000 } : {});
+    const chunks = []; rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const done = new Promise(res => { rec.onstop = () => res(new Blob(chunks, { type: 'video/webm' })); });
+    rec.start();
+    await v.play().catch(() => {});
+    await new Promise(res => {
+      let stopped = false;
+      const finish = () => { if (stopped) return; stopped = true; res(); };
+      v.onended = finish;
+      (function loop() {
+        if (v.ended) return finish();
+        ctx.drawImage(v, 0, 0, W, H);
+        try { drawFrame(ctx, W, H, v.currentTime); } catch (e) {}
+        if (onProgress && dur) onProgress(Math.min(1, v.currentTime / dur));
+        requestAnimationFrame(loop);
+      })();
+    });
+    rec.stop();
+    return done;
   }
 
   function drawHeatmap(canvas, points) {
