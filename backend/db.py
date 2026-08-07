@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS blobs (
 -- offset + gaze over time so the researcher can replay the scrolled view faithfully.
 CREATE TABLE IF NOT EXISTS page_tracks (
     session_id TEXT, stimulus_id TEXT, viewport_w INTEGER, viewport_h INTEGER,
-    page_h INTEGER, track_json TEXT, created_at INTEGER,
+    page_h INTEGER, track_json TEXT, taps_json TEXT, created_at INTEGER,
     PRIMARY KEY (session_id, stimulus_id)
 );
 
@@ -229,6 +229,12 @@ _MIGRATIONS = [
     # capture the whole picture.
     ("sessions", "screen_recording_url", "TEXT"),
     ("sessions", "screen_gaze_json", "TEXT"),
+    # Full-page screenshot of a website stimulus (a same-origin image we present as a
+    # scrollable stimulus). Makes website tracking work uniformly on ALL phones incl.
+    # iPhone (no cross-origin live iframe) and makes the replay bakeable to video.
+    ("stimuli", "screenshot_url", "TEXT"),
+    # Taps on a website stimulus (link-click modeling): [[t, x, pageY_px], ...].
+    ("page_tracks", "taps_json", "TEXT"),
 ]
 
 

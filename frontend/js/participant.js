@@ -909,6 +909,13 @@
     $('stimulus-stage').addEventListener('click', (e) => {
       if (!state.capturing) return;
       pushEvent('click', { x: e.clientX, y: e.clientY }, e.clientX, e.clientY);
+      // Website tap ("did they click a link?"): record x (viewport-normalized) + the
+      // absolute PAGE y (scroll offset + tap y) + time, for the replay + tap metrics.
+      if (state.urlTrack) {
+        const ut = state.urlTrack;
+        ut.taps.push([Date.now() - ut.startMs, +(e.clientX / ut.vw).toFixed(4),
+          Math.round((ut.scrollEl ? ut.scrollEl.scrollTop : 0) + e.clientY)]);
+      }
     });
 
     // Keep the stimulus fitted (and gaze normalization correct) when the viewport
@@ -1208,7 +1215,7 @@
           try {
             await API.post(`/api/session/${state.sessionId}/page-track`, {
               stimulus_id: ut.stim.id, viewport_w: ut.vw, viewport_h: ut.vh,
-              page_h: ut.pageH(), track: ut.track });
+              page_h: ut.pageH(), track: ut.track, taps: ut.taps || [] });
           } catch (e) { console.warn('page-track upload failed', e); }
         }
         await API.patch(`/api/trial/${trial.trial_id}`, { offset_ts: Date.now() });
@@ -1222,58 +1229,80 @@
 
       if (isUrl) {
         const frame = $('stimulus-frame');
+        const img = $('stimulus-img');
         const stage = $('stimulus-stage');
-        $('stimulus-img').style.display = 'none';
         $('stimulus-video').style.display = 'none';
-        frame.style.display = 'block';
         const vw = window.innerWidth, vh = window.innerHeight;
-        state.stimRect = { left: 0, top: 0, width: vw, height: vh };  // gaze vs. viewport (both modes)
+        state.stimRect = { left: 0, top: 0, width: vw, height: vh };  // gaze vs. viewport
         state.activeStim = { kind: 'url' };
-        // iOS (all iOS browsers are WebKit) can't reliably render a TALL cross-origin
-        // iframe inside a scrolling container — it blanks out, so the website "wasn't
-        // opening" on iPhone. Give iOS a plain full-viewport iframe with the SITE's own
-        // internal scroll (reliable). Scroll offset isn't trackable cross-origin there,
-        // so iOS sessions get gaze-over-viewport (static heatmap) but no scroll replay.
-        const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
-          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        if (isIOS) {
-          Object.assign(frame.style, { position: 'absolute', left: '0', top: '0',
-            width: vw + 'px', height: vh + 'px', pointerEvents: 'auto' });
-          frame.removeAttribute('scrolling');
-        } else {
-          // Non-iOS: tall iframe + the STAGE scrolls (trackable). pointer-events:none so
-          // touches scroll OUR container, not the cross-origin site. Grows on demand.
-          let frameH = Math.round(vh * 3);
-          Object.assign(frame.style, { position: 'relative', left: '0', top: '0',
-            width: vw + 'px', height: frameH + 'px', pointerEvents: 'none' });
-          frame.setAttribute('scrolling', 'no');
-          stage.style.overflowY = 'auto';
-          stage.style.webkitOverflowScrolling = 'touch';
-          state.urlTrack = { stim, startMs: 0, vw, vh, track: [], scrollEl: stage,
-            pageH: () => frameH };
-          const onScroll = () => {
-            if (stage.scrollTop + vh * 2 > frameH) { frameH += Math.round(vh * 2); frame.style.height = frameH + 'px'; }
-          };
-          stage.addEventListener('scroll', onScroll, { passive: true });
-          state.urlCleanup = () => {
-            stage.removeEventListener('scroll', onScroll);
-            stage.style.overflowY = ''; stage.scrollTop = 0;
-            frame.removeAttribute('scrolling');
-            Object.assign(frame.style, { position: 'absolute', pointerEvents: '', height: vh + 'px' });
-          };
-        }
+        const dms = (stim.duration_ms && stim.duration_ms > 0) ? stim.duration_ms : 15000;
         let started = false;
         const start = () => {
           if (started) return; started = true;
           if (state.urlTrack) state.urlTrack.startMs = Date.now();
           beginCapture();
-          runTrialClock((stim.duration_ms && stim.duration_ms > 0) ? stim.duration_ms : 15000,
-            null, finishTrial);
+          runTrialClock(dms, null, finishTrial);
         };
-        frame.onload = start;
-        frame.src = stim.file_url;
-        // Sites that block embedding (X-Frame-Options) never fire onload — start anyway.
-        setTimeout(start, 1800);
+
+        if (stim.screenshot_url) {
+          // SCREENSHOT MODE (default): a full-page screenshot shown as a scrollable
+          // same-origin image. Renders reliably on ALL phones incl. iPhone (no
+          // cross-origin iframe), and lets us track scroll + gaze + taps and bake the
+          // replay. This is the path that makes mobile website studies actually work.
+          frame.style.display = 'none';
+          img.style.display = 'block';
+          stage.style.overflowY = 'auto';
+          stage.style.webkitOverflowScrolling = 'touch';
+          state.urlTrack = { stim, startMs: 0, vw, vh, track: [], taps: [], scrollEl: stage,
+            image: true, pageH: () => Math.round(img.getBoundingClientRect().height || vh) };
+          state.urlCleanup = () => {
+            stage.style.overflowY = ''; stage.scrollTop = 0;
+            Object.assign(img.style, { position: 'absolute', width: '', height: '' });
+          };
+          img.onload = () => {
+            Object.assign(img.style, { position: 'relative', left: '0', top: '0',
+              width: vw + 'px', height: 'auto' });
+            start();
+          };
+          img.onerror = start;
+          img.src = stim.screenshot_url;
+          setTimeout(start, 3000);
+        } else {
+          // Fallback (no screenshot captured): the LIVE site in an iframe. iOS gets a
+          // plain full-viewport iframe (WebKit blanks tall cross-origin iframes); others
+          // get the tall scroll-tracking iframe.
+          img.style.display = 'none';
+          frame.style.display = 'block';
+          const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          if (isIOS) {
+            Object.assign(frame.style, { position: 'absolute', left: '0', top: '0',
+              width: vw + 'px', height: vh + 'px', pointerEvents: 'auto' });
+            frame.removeAttribute('scrolling');
+          } else {
+            let frameH = Math.round(vh * 3);
+            Object.assign(frame.style, { position: 'relative', left: '0', top: '0',
+              width: vw + 'px', height: frameH + 'px', pointerEvents: 'none' });
+            frame.setAttribute('scrolling', 'no');
+            stage.style.overflowY = 'auto';
+            stage.style.webkitOverflowScrolling = 'touch';
+            state.urlTrack = { stim, startMs: 0, vw, vh, track: [], taps: [], scrollEl: stage,
+              pageH: () => frameH };
+            const onScroll = () => {
+              if (stage.scrollTop + vh * 2 > frameH) { frameH += Math.round(vh * 2); frame.style.height = frameH + 'px'; }
+            };
+            stage.addEventListener('scroll', onScroll, { passive: true });
+            state.urlCleanup = () => {
+              stage.removeEventListener('scroll', onScroll);
+              stage.style.overflowY = ''; stage.scrollTop = 0;
+              frame.removeAttribute('scrolling');
+              Object.assign(frame.style, { position: 'absolute', pointerEvents: '', height: vh + 'px' });
+            };
+          }
+          frame.onload = start;
+          frame.src = stim.file_url;
+          setTimeout(start, 1800);
+        }
       } else if (isVideo) {
         const video = $('stimulus-video');
         $('stimulus-img').style.display = 'none';

@@ -203,8 +203,9 @@ async def upload_stimulus(sid: str, file: UploadFile = File(...),
 
 @app.post("/api/studies/{sid}/stimuli/url")
 async def add_url_stimulus(sid: str, req: Request):
-    """A live website as a stimulus: no file, just a URL the runtime loads in an
-    iframe and tracks gaze over. file_url holds the URL; type='url'."""
+    """A website as a stimulus. file_url holds the URL; type='url'. A full-page
+    screenshot is captured separately (POST .../screenshot) and shown as a scrollable
+    same-origin image — this is what makes website tracking work on iPhone."""
     body = await req.json()
     url = (body.get("url") or "").strip()
     if not (url.startswith("http://") or url.startswith("https://")):
@@ -220,6 +221,53 @@ async def add_url_stimulus(sid: str, req: Request):
             "width_px,height_px,order_index) VALUES (?,?,?,?,?,?,?,?,?)",
             (stid, sid, None, "url", url, duration_ms, 0, 0, order))
     return {"id": stid, "file_url": url, "type": "url", "order_index": order}
+
+
+def _png_size(data: bytes):
+    if len(data) >= 24 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        import struct
+        w, h = struct.unpack(">II", data[16:24])
+        return w, h
+    return None
+
+
+@app.post("/api/stimuli/{stid}/screenshot")
+def capture_stimulus_screenshot(stid: str, width: int = 500):
+    """Capture a FULL-PAGE screenshot of a website stimulus and store it as a same-origin
+    image. Presenting the site as an image (not a live cross-origin iframe) is what lets
+    us track scroll+gaze on ALL phones including iPhone, and bake the replay to video.
+    Uses thum.io's keyless full-page endpoint; the (public) study URL is sent to it."""
+    import urllib.request
+    with db.get_conn() as conn:
+        st = db.row_to_dict(conn.execute("SELECT * FROM stimuli WHERE id=?", (stid,)).fetchone())
+    if not st:
+        raise HTTPException(404, "stimulus not found")
+    url = st.get("file_url") or ""
+    if st.get("type") != "url" or not url.startswith("http"):
+        raise HTTPException(400, "not a website stimulus")
+    width = max(320, min(1200, int(width or 500)))
+    shot_url = f"https://image.thum.io/get/width/{width}/fullpage/{url}"
+    try:
+        rq = urllib.request.Request(shot_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(rq, timeout=55) as r:
+            data = r.read()
+    except Exception as e:
+        raise HTTPException(502, f"screenshot service failed: {e}")
+    size = _png_size(data)
+    if not size:
+        raise HTTPException(502, "screenshot service did not return a PNG")
+    w, h = size
+    fname = f"shot_{stid}.png"
+    try:
+        with open(os.path.join(STORAGE, fname), "wb") as f:
+            f.write(data)
+    except Exception:
+        pass
+    db.save_blob(fname, "image/png", data)
+    with db.get_conn() as conn:
+        conn.execute("UPDATE stimuli SET screenshot_url=?, width_px=?, height_px=? WHERE id=?",
+                     (f"/storage/{fname}", w, h, stid))
+    return {"ok": True, "screenshot_url": f"/storage/{fname}", "width": w, "height": h}
 
 
 @app.get("/api/studies/{sid}/stimuli")
@@ -446,32 +494,40 @@ async def store_page_track(sess: str, req: Request):
     if not stid:
         raise HTTPException(400, "stimulus_id required")
     track = json.dumps(body.get("track", []))
+    taps = json.dumps(body.get("taps", []))
     with db.get_conn() as conn:
         if not conn.execute("SELECT id FROM sessions WHERE id=?", (sess,)).fetchone():
             raise HTTPException(404, "session not found")
         conn.execute("DELETE FROM page_tracks WHERE session_id=? AND stimulus_id=?", (sess, stid))
         conn.execute(
             "INSERT INTO page_tracks (session_id,stimulus_id,viewport_w,viewport_h,page_h,"
-            "track_json,created_at) VALUES (?,?,?,?,?,?,?)",
+            "track_json,taps_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
             (sess, stid, int(body.get("viewport_w") or 0), int(body.get("viewport_h") or 0),
-             int(body.get("page_h") or 0), track, now_ms()))
-    return {"ok": True, "points": len(body.get("track", []))}
+             int(body.get("page_h") or 0), track, taps, now_ms()))
+    return {"ok": True, "points": len(body.get("track", [])), "taps": len(body.get("taps", []))}
 
 
 @app.get("/api/session/{sess}/stimulus/{stid}/page-track")
 def get_page_track(sess: str, stid: str):
+    stim = None
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT viewport_w,viewport_h,page_h,track_json FROM page_tracks "
+            "SELECT viewport_w,viewport_h,page_h,track_json,taps_json FROM page_tracks "
             "WHERE session_id=? AND stimulus_id=?", (sess, stid)).fetchone()
+        srow = conn.execute("SELECT screenshot_url FROM stimuli WHERE id=?", (stid,)).fetchone()
+        if srow:
+            stim = srow["screenshot_url"]
     if not row:
-        return {"viewport_w": 0, "viewport_h": 0, "page_h": 0, "track": []}
-    try:
-        track = json.loads(row["track_json"] or "[]")
-    except (ValueError, TypeError):
-        track = []
+        return {"viewport_w": 0, "viewport_h": 0, "page_h": 0, "track": [], "taps": [],
+                "screenshot_url": stim}
+    def _load(s):
+        try:
+            return json.loads(s or "[]")
+        except (ValueError, TypeError):
+            return []
     return {"viewport_w": row["viewport_w"], "viewport_h": row["viewport_h"],
-            "page_h": row["page_h"], "track": track}
+            "page_h": row["page_h"], "track": _load(row["track_json"]),
+            "taps": _load(row["taps_json"]), "screenshot_url": stim}
 
 
 @app.get("/api/session/{sess}/screen-replay")

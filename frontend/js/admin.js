@@ -282,7 +282,7 @@
         ? 'JPG / PNG / WebP. Shown for the duration you set.'
         : t === 'video'
         ? 'MP4 / WebM. Set duration to 0 to play the full clip.'
-        : 'The participant sees the live website full-screen while we track their gaze. It renders responsively (mobile participants see the mobile layout). Some sites (Google, YouTube, banks) block embedding and show blank — check with Preview after adding.';
+        : 'We capture a full-page screenshot of the site and show it as a scrollable stimulus — so tracking (where/when/how long, scroll, taps) works on ALL phones incl. iPhone, and the replay is saveable. Capture takes a few seconds. Some sites block screenshotting; you can re-capture from the stimulus below.';
     }
     typeSel.addEventListener('change', syncType); syncType();
 
@@ -292,7 +292,10 @@
         if (t === 'url') {
           const url = urlInput.value.trim();
           if (!/^https?:\/\//i.test(url)) return toast('Enter a full URL starting with http:// or https://');
-          await API.post(`/api/studies/${study.id}/stimuli/url`, { url, duration_ms: +dur.value || 15000 });
+          const r = await API.post(`/api/studies/${study.id}/stimuli/url`, { url, duration_ms: +dur.value || 15000 });
+          toast('Capturing full-page screenshot…', 6000);
+          try { await API.post(`/api/stimuli/${r.id}/screenshot`); }
+          catch (e) { toast('Website added, but screenshot failed: ' + e.message + ' — use Re-capture below.', 6000); }
         } else {
           const f = fileInput.files[0];
           if (!f) return toast('Choose a ' + t + ' file');
@@ -352,19 +355,21 @@
       } }, 'Delete')));
 
     if (isUrl) {
-      wrap.appendChild(h('p', { class: 'hint' },
-        'Live website stimulus. Participants view it full-screen while we track gaze. AOIs and heatmap-over-page are not available for live sites (cross-origin). Use Preview to confirm the site allows embedding.'));
+      const hasShot = !!st.screenshot_url;
+      wrap.appendChild(h('p', { class: 'hint' }, hasShot
+        ? 'Website stimulus — shown as a scrollable full-page screenshot, so tracking (where/when/how long, scroll, taps) works on all phones incl. iPhone and the replay is saveable.'
+        : 'Website stimulus — no screenshot yet. Re-capture below; until then it falls back to a live iframe (which doesn’t track scroll on iPhone).'));
       wrap.appendChild(h('div', { style: 'display:flex;gap:12px;align-items:center;flex-wrap:wrap' },
         h('a', { href: st.file_url, target: '_blank', class: 'mono', style: 'color:var(--accent)' }, st.file_url),
-        h('button', { class: 'btn sm', onclick: () => {
-          const box = wrap.querySelector('.url-preview');
-          if (box.style.display === 'none') {
-            box.style.display = 'block';
-            box.innerHTML = `<iframe src="${st.file_url}" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px;background:#fff"></iframe>`
-              + '<p class="hint">If this stays blank, the site blocks embedding and cannot be used as a stimulus.</p>';
-          } else { box.style.display = 'none'; box.innerHTML = ''; }
-        } }, 'Preview')));
-      wrap.appendChild(h('div', { class: 'url-preview', style: 'display:none;margin-top:12px' }));
+        h('button', { class: 'btn sm', onclick: async (e) => {
+          const b = e.target; const lbl = b.textContent; b.disabled = true; b.textContent = 'Capturing… (few s)';
+          try { await API.post(`/api/stimuli/${st.id}/screenshot`); toast('Screenshot captured'); openStudy(study.id, 'Stimuli & AOIs'); }
+          catch (err) { toast('Capture failed: ' + err.message); b.disabled = false; b.textContent = lbl; }
+        } }, hasShot ? 'Re-capture screenshot' : 'Capture screenshot')));
+      if (hasShot) {
+        wrap.appendChild(h('img', { src: st.screenshot_url,
+          style: 'display:block;max-width:320px;width:100%;margin-top:12px;border:1px solid var(--border);border-radius:8px' }));
+      }
       return wrap;
     }
 
@@ -590,20 +595,17 @@
       wrap.appendChild(h('p', { class: 'hint' },
         h('span', {}, 'Website: '),
         h('a', { href: st.file_url, target: '_blank', class: 'mono', style: 'color:var(--accent)' }, st.file_url)));
-      // Match the participant's screen aspect when a single session is selected, else
-      // use a phone frame for mobile-allowed studies (so the site renders its mobile
-      // layout, matching what the participant saw) or landscape for desktop-only.
-      const s = ctx.sess;
-      let aw = 16, ah = 9;
-      if (s && s.screen_width && s.screen_height) { aw = s.screen_width; ah = s.screen_height; }
-      else if (ctx.allowMobile) { aw = 390; ah = 780; }
-      const portrait = ah > aw;
-      const maxW = portrait ? 380 : 680;
-      const holder = h('div', { style: `position:relative;width:100%;max-width:${maxW}px;aspect-ratio:${aw}/${ah};border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff` });
-      const frame = h('iframe', { src: st.file_url, referrerpolicy: 'no-referrer',
-        style: 'position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none' });
+      // Aggregate view: heatmap over the stored full-page screenshot (our image → shows
+      // the real page). Falls back to a live iframe only if there's no screenshot.
+      const shot = st.screenshot_url;
+      const holder = h('div', { style: `position:relative;width:100%;max-width:${shot ? 400 : 680}px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff` });
+      const anchor = shot
+        ? h('img', { src: shot, style: 'display:block;width:100%;height:auto' })
+        : h('iframe', { src: st.file_url, referrerpolicy: 'no-referrer',
+            style: 'position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none' });
+      if (!shot) holder.style.aspectRatio = (ctx.allowMobile ? '390/780' : '16/9');
       const canvas = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
-      holder.appendChild(frame); holder.appendChild(canvas);
+      holder.appendChild(anchor); holder.appendChild(canvas);
       wrap.appendChild(holder);
       const drawWhenSized = () => {
         const w = holder.clientWidth, hh = holder.clientHeight;
@@ -611,9 +613,10 @@
         canvas.width = w; canvas.height = hh;
         try { drawHeatmap(canvas, data.heatmap_points); } catch (e) { console.warn('heatmap draw failed', e); }
       };
+      if (shot) anchor.addEventListener('load', () => requestAnimationFrame(drawWhenSized));
       requestAnimationFrame(drawWhenSized);
       wrap.appendChild(h('p', { class: 'hint' },
-        'The live site is shown as the anchor. If the participant scrolled, the heatmap reflects on-screen gaze and may not line up with scrolled content — enable screen recording (desktop) for scroll-accurate replay.'));
+        'Full-page screenshot with the aggregate gaze heatmap. For per-session "read the top then scrolled" playback + taps, select a single session above.'));
       return wrap;
     }
     // heatmap canvas over the stimulus (image or video frame)
@@ -825,6 +828,8 @@
     const d = await API.get(`/api/session/${sessionId}/stimulus/${st.id}/page-track`);
     const track = d.track || [];
     if (!track.length) return null;
+    const taps = d.taps || [];
+    const shot = d.screenshot_url || st.screenshot_url;
     const vw = d.viewport_w || 390, vh = d.viewport_h || 780, pageH = d.page_h || vh * 3;
     const box = h('div', { style: 'margin-top:6px' });
     box.appendChild(h('h4', { style: 'color:var(--text);margin:0 0 8px' }, '▶ Scroll-aware gaze replay'));
@@ -832,28 +837,51 @@
     const scale = displayW / vw;
     const displayH = Math.round(vh * scale);
     const winEl = h('div', { style: `position:relative;width:${displayW}px;height:${displayH}px;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:#fff` });
-    const frame = h('iframe', { src: st.file_url, referrerpolicy: 'no-referrer', scrolling: 'no',
-      style: `position:absolute;top:0;left:0;width:${vw}px;height:${pageH}px;border:0;transform-origin:top left;pointer-events:none` });
+    // The page background: our stored screenshot (same-origin → real page + bakeable) when
+    // available; a cross-origin iframe only as a legacy fallback.
+    const pageEl = shot
+      ? h('img', { src: shot, style: `position:absolute;top:0;left:0;width:${vw}px;height:auto;transform-origin:top left` })
+      : h('iframe', { src: st.file_url, referrerpolicy: 'no-referrer', scrolling: 'no',
+          style: `position:absolute;top:0;left:0;width:${vw}px;height:${pageH}px;border:0;transform-origin:top left;pointer-events:none` });
     const pathC = h('canvas', { width: String(displayW), height: String(displayH),
       style: `position:absolute;inset:0;width:${displayW}px;height:${displayH}px;pointer-events:none` });
     const dot = h('div', { style: 'position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border:3px solid rgba(255,60,0,.9);border-radius:50%;box-shadow:0 0 0 2px rgba(0,0,0,.3);pointer-events:none' });
-    winEl.appendChild(frame); winEl.appendChild(pathC); winEl.appendChild(dot);
+    winEl.appendChild(pageEl); winEl.appendChild(pathC); winEl.appendChild(dot);
     box.appendChild(winEl);
     const pctx = pathC.getContext('2d');
     const tPath = h('input', { type: 'checkbox', style: 'width:auto;margin:0 4px 0 0', checked: 'checked' });
+    const tTaps = h('input', { type: 'checkbox', style: 'width:auto;margin:0 4px 0 0', checked: 'checked' });
     const maxT = track[track.length - 1][0] || 1;
     const slider = h('input', { type: 'range', min: '0', max: String(maxT), value: '0', step: '50',
       style: 'width:' + displayW + 'px;display:block;margin-top:8px' });
     const playBtn = h('button', { class: 'btn sm' }, '▶ Play');
     const timeLbl = h('span', { class: 'muted', style: 'margin-left:10px' }, '0.0s');
     box.appendChild(slider);
-    box.appendChild(h('div', { style: 'margin-top:6px;display:flex;align-items:center' }, playBtn, timeLbl,
-      h('label', { style: 'color:var(--muted);display:inline-flex;align-items:center;margin-left:14px' }, tPath, 'Scanpath')));
+    const ctrlRow = h('div', { style: 'margin-top:6px;display:flex;align-items:center;flex-wrap:wrap' }, playBtn, timeLbl,
+      h('label', { style: 'color:var(--muted);display:inline-flex;align-items:center;margin-left:14px' }, tPath, 'Scanpath'),
+      h('label', { style: 'color:var(--muted);display:inline-flex;align-items:center;margin-left:12px' }, tTaps, `Taps (${taps.length})`));
+    box.appendChild(ctrlRow);
     tPath.addEventListener('change', () => render(+slider.value));
+    tTaps.addEventListener('change', () => render(+slider.value));
     box.appendChild(h('p', { class: 'hint' },
-      `${track.length} samples · the frame scrolls exactly as the participant did; the red ring is their gaze, blue lines are saccades. Play or drag the slider.`));
-    box.appendChild(h('p', { class: 'hint' },
-      'Note: this replay reconstructs a live third-party site, so it can’t be baked into a downloadable file (the browser forbids capturing cross-origin pixels). To get a saveable video-with-overlays of a website, run that session on desktop with screen recording enabled.'));
+      `${track.length} samples · ${taps.length} taps · scrolls exactly as the participant did; red ring = gaze, blue = saccades, orange ✕ = a tap (where they clicked). Play or drag the slider.`));
+
+    // Save the reconstructed session as a video (only possible with the same-origin
+    // screenshot — a cross-origin iframe can't be captured).
+    if (shot) {
+      const saveBtn = h('button', { class: 'btn sm', style: 'margin-left:12px' }, '⬇ Save replay video');
+      saveBtn.onclick = async () => {
+        const label = saveBtn.textContent; saveBtn.disabled = true; saveBtn.textContent = 'Rendering… 0%';
+        try {
+          const blob = await bakeScrollReplay(shot, track, taps, { vw, vh, tPath, tTaps },
+            (p) => { saveBtn.textContent = `Rendering… ${Math.round(p * 100)}%`; });
+          downloadBlob(blob, `gaze-replay-${sessionId}.webm`);
+          toast('Saved — check your downloads');
+        } catch (e) { toast('Could not render: ' + e.message); }
+        saveBtn.disabled = false; saveBtn.textContent = label;
+      };
+      ctrlRow.appendChild(saveBtn);
+    }
 
     function sampleAt(t) {
       let lo = 0, hi = track.length - 1, idx = 0;
@@ -862,16 +890,25 @@
     }
     function render(t) {
       const s = sampleAt(t);
-      frame.style.transform = `scale(${scale}) translateY(${-s[3]}px)`;
+      pageEl.style.transform = `scale(${scale}) translateY(${-s[3]}px)`;
       dot.style.left = (s[1] * displayW) + 'px';
       dot.style.top = (s[2] * displayH) + 'px';
-      // scanpath of the recent ~1.5 s (only points at a similar scroll offset, so the
-      // saccade lines reflect on-screen movement, not the scroll jump itself)
       pctx.clearRect(0, 0, displayW, displayH);
       if (tPath.checked) {
         const recent = track.filter(p => p[0] <= t && p[0] >= t - 1500 && Math.abs(p[3] - s[3]) < vh * 0.5)
           .map(p => ({ x: p[1], y: p[2] }));
         paintScanpath(pctx, recent, displayW, displayH);
+      }
+      if (tTaps.checked) {
+        // taps that have happened by now, drawn at their page position minus current scroll
+        for (const tp of taps) {
+          if (tp[0] > t) continue;
+          const px = tp[1] * displayW, py = (tp[2] - s[3]) * scale;
+          if (py < -10 || py > displayH + 10) continue;
+          pctx.strokeStyle = 'rgba(255,140,0,0.95)'; pctx.lineWidth = 3;
+          pctx.beginPath(); pctx.moveTo(px - 7, py - 7); pctx.lineTo(px + 7, py + 7);
+          pctx.moveTo(px + 7, py - 7); pctx.lineTo(px - 7, py + 7); pctx.stroke();
+        }
       }
       timeLbl.textContent = (t / 1000).toFixed(1) + 's';
       slider.value = String(Math.round(t));
@@ -888,6 +925,50 @@
     slider.oninput = () => { pause(); render(+slider.value); };
     render(0);
     return box;
+  }
+
+  // Bake a website scroll replay (screenshot image + scroll track + gaze + taps) into a
+  // downloadable webm. Driven by a virtual clock (no source video) rendering the page
+  // scrolled to each moment with overlays, at ~30fps real-time.
+  async function bakeScrollReplay(shotUrl, track, taps, opts, onProgress) {
+    if (typeof MediaRecorder === 'undefined') throw new Error('recording not supported in this browser');
+    const { vw, vh, tPath, tTaps } = opts;
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('screenshot load failed')); img.src = shotUrl; });
+    const W = vw, H = vh, scale = 1;
+    const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const stream = canvas.captureStream(30);
+    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 4000000 } : {});
+    const chunks = []; rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const done = new Promise(res => { rec.onstop = () => res(new Blob(chunks, { type: 'video/webm' })); });
+    const maxT = track[track.length - 1][0] || 1;
+    const imgScale = vw / img.naturalWidth;   // screenshot displayed at viewport width
+    function sampleAt(t) { let lo = 0, hi = track.length - 1, idx = 0; while (lo <= hi) { const mid = (lo + hi) >> 1; if (track[mid][0] <= t) { idx = mid; lo = mid + 1; } else hi = mid - 1; } return track[idx]; }
+    rec.start();
+    const startWall = performance.now();
+    await new Promise(res => {
+      (function loop() {
+        const t = performance.now() - startWall;
+        const s = sampleAt(Math.min(t, maxT));
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+        // draw the screenshot scrolled to s[3] (page px in viewport space), scaled to width
+        ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight,
+          0, -s[3], W, img.naturalHeight * imgScale);
+        if (tPath.checked) {
+          const recent = track.filter(p => p[0] <= t && p[0] >= t - 1500 && Math.abs(p[3] - s[3]) < vh * 0.5).map(p => ({ x: p[1], y: p[2] }));
+          paintScanpath(ctx, recent, W, H);
+        }
+        ctx.beginPath(); ctx.arc(s[1] * W, s[2] * H, 12, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,60,0,0.95)'; ctx.lineWidth = 3; ctx.stroke();
+        if (tTaps.checked) for (const tp of taps) { if (tp[0] > t) continue; const px = tp[1] * W, py = (tp[2] - s[3]); if (py < -10 || py > H + 10) continue; ctx.strokeStyle = 'rgba(255,140,0,0.95)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(px - 7, py - 7); ctx.lineTo(px + 7, py + 7); ctx.moveTo(px + 7, py - 7); ctx.lineTo(px - 7, py + 7); ctx.stroke(); }
+        if (onProgress) onProgress(Math.min(1, t / maxT));
+        if (t >= maxT) return res();
+        requestAnimationFrame(loop);
+      })();
+    });
+    rec.stop();
+    return done;
   }
 
   // Scanpath: connect successive gaze points in order — the long segments ARE the
