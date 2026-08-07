@@ -1244,11 +1244,17 @@
           runTrialClock(dms, null, finishTrial);
         };
 
-        if (stim.screenshot_url) {
-          // SCREENSHOT MODE (default): a full-page screenshot shown as a scrollable
-          // same-origin image. Renders reliably on ALL phones incl. iPhone (no
-          // cross-origin iframe), and lets us track scroll + gaze + taps and bake the
-          // replay. This is the path that makes mobile website studies actually work.
+        // DECISION (not a hard switch):
+        //  • If we're screen-recording this session (desktop + participant approved the
+        //    share), show the LIVE site — the recording captures the real page evolving
+        //    as they scroll, and gaze overlays that recording in results. Best fidelity.
+        //  • Otherwise (iPhone/mobile — no getDisplayMedia — or recording declined/off),
+        //    fall back to the SCREENSHOT scrollable image, which tracks scroll+gaze+taps
+        //    everywhere. iOS never has an active recording, so it always lands here.
+        const liveRecording = !!state.screenRec;
+        const useScreenshot = !liveRecording && !!stim.screenshot_url;
+
+        if (useScreenshot) {
           frame.style.display = 'none';
           img.style.display = 'block';
           stage.style.overflowY = 'auto';
@@ -1268,39 +1274,17 @@
           img.src = stim.screenshot_url;
           setTimeout(start, 3000);
         } else {
-          // Fallback (no screenshot captured): the LIVE site in an iframe. iOS gets a
-          // plain full-viewport iframe (WebKit blanks tall cross-origin iframes); others
-          // get the tall scroll-tracking iframe.
+          // LIVE site: full-viewport iframe with the site's own scroll. When recording is
+          // active the screen capture records the real scrolling; gaze is tracked over the
+          // viewport (state.screenGaze) and overlaid on the recording in results.
           img.style.display = 'none';
           frame.style.display = 'block';
-          const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
-            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-          if (isIOS) {
-            Object.assign(frame.style, { position: 'absolute', left: '0', top: '0',
-              width: vw + 'px', height: vh + 'px', pointerEvents: 'auto' });
-            frame.removeAttribute('scrolling');
-          } else {
-            let frameH = Math.round(vh * 3);
-            Object.assign(frame.style, { position: 'relative', left: '0', top: '0',
-              width: vw + 'px', height: frameH + 'px', pointerEvents: 'none' });
-            frame.setAttribute('scrolling', 'no');
-            stage.style.overflowY = 'auto';
-            stage.style.webkitOverflowScrolling = 'touch';
-            state.urlTrack = { stim, startMs: 0, vw, vh, track: [], taps: [], scrollEl: stage,
-              pageH: () => frameH };
-            const onScroll = () => {
-              if (stage.scrollTop + vh * 2 > frameH) { frameH += Math.round(vh * 2); frame.style.height = frameH + 'px'; }
-            };
-            stage.addEventListener('scroll', onScroll, { passive: true });
-            state.urlCleanup = () => {
-              stage.removeEventListener('scroll', onScroll);
-              stage.style.overflowY = ''; stage.scrollTop = 0;
-              frame.removeAttribute('scrolling');
-              Object.assign(frame.style, { position: 'absolute', pointerEvents: '', height: vh + 'px' });
-            };
-          }
+          Object.assign(frame.style, { position: 'absolute', left: '0', top: '0',
+            width: vw + 'px', height: vh + 'px', pointerEvents: 'auto' });
+          frame.removeAttribute('scrolling');
           frame.onload = start;
           frame.src = stim.file_url;
+          // Sites that block embedding (X-Frame-Options) never fire onload — start anyway.
           setTimeout(start, 1800);
         }
       } else if (isVideo) {
