@@ -19,7 +19,7 @@ import os
 import time
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse, Response
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse, Response, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 import db
@@ -52,6 +52,14 @@ async def no_cache(request: Request, call_next):
 
 def now_ms():
     return int(time.time() * 1000)
+
+
+def fmt_ts(ms):
+    """ms-epoch -> human-readable UTC string (for CSV/admin views)."""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime((ms or 0) / 1000))
+    except (ValueError, TypeError, OSError):
+        return ""
 
 
 # ===========================================================================
@@ -1107,6 +1115,143 @@ def serve_config():
 @app.get("/study")
 def study_page():
     return FileResponse(os.path.join(FRONTEND, "study.html"))
+
+
+# ===========================================================================
+# Intern application form: public form at /apply, submissions stored in the DB,
+# password-protected read page at /apply/responses + CSV export.
+# ===========================================================================
+# Secret that gates the responses view/export. Override in the Render dashboard
+# with env var TBS_ADMIN_KEY for a private key not visible in the repo.
+TBS_ADMIN_KEY = os.environ.get("TBS_ADMIN_KEY", "tbs_dc44eb06c83d880d")
+
+# Field order for the CSV / view (matches the form's input names).
+APPLY_FIELDS = [
+    "name", "email", "phone", "city", "stage", "field", "three_words", "odd_skill",
+    "why_tbs", "strengths", "what_you_want", "participant_data", "data_exp", "tools",
+    "field_scenario", "content_exp", "content_link", "content_skills", "reel_idea",
+    "task_three", "task_boring", "task_question", "task_design", "commit", "hours",
+    "travel", "devices", "schedule_notes", "curiosity", "anything_else", "submitted_at",
+]
+
+
+def _apply_check_key(key):
+    if key != TBS_ADMIN_KEY:
+        raise HTTPException(403, "Invalid or missing key.")
+
+
+def _apply_val(v):
+    """Flatten a form value (checkbox groups arrive as lists) to a string."""
+    if isinstance(v, list):
+        return "; ".join(str(x) for x in v)
+    return "" if v is None else str(v)
+
+
+@app.get("/apply")
+def apply_form():
+    return FileResponse(os.path.join(FRONTEND, "apply.html"))
+
+
+@app.post("/api/applications")
+async def submit_application(req: Request):
+    body = await req.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "invalid submission")
+    aid = db.new_id("app")
+    with db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO applications (id,name,email,phone,city,data_json,submitted_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (aid, _apply_val(body.get("name"))[:300], _apply_val(body.get("email"))[:300],
+             _apply_val(body.get("phone"))[:100], _apply_val(body.get("city"))[:200],
+             json.dumps(body), now_ms()))
+    return {"ok": True}
+
+
+@app.get("/api/applications/export")
+def export_applications(key: str = ""):
+    _apply_check_key(key)
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT data_json, submitted_at FROM applications ORDER BY submitted_at DESC"
+        ).fetchall()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(APPLY_FIELDS + ["received_at"])
+    for r in rows:
+        try:
+            d = json.loads(r["data_json"])
+        except (ValueError, TypeError):
+            d = {}
+        w.writerow([_apply_val(d.get(c)) for c in APPLY_FIELDS]
+                   + [fmt_ts(r["submitted_at"])])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=tbs_intern_applications.csv"})
+
+
+@app.get("/apply/responses", response_class=HTMLResponse)
+def applications_view(key: str = ""):
+    _apply_check_key(key)
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT data_json, submitted_at FROM applications ORDER BY submitted_at DESC"
+        ).fetchall()
+    import html as _html
+    labels = {
+        "stage": "Stage", "field": "Field/course", "three_words": "3 words",
+        "odd_skill": "Oddly useful skill", "why_tbs": "Why TBS", "strengths": "Strengths",
+        "what_you_want": "What they want", "participant_data": "Collected participant data?",
+        "data_exp": "Data experience", "tools": "Tools", "field_scenario": "Fieldwork scenario",
+        "content_exp": "Content experience", "content_link": "Content link",
+        "content_skills": "Content skills", "reel_idea": "Reel idea",
+        "task_three": "Task — 3 things", "task_boring": "Task — boring/repetitive",
+        "task_question": "Task — question to learn", "task_design": "Task — 3-step test",
+        "commit": "Can commit?", "hours": "Hours/week", "travel": "Travel?",
+        "devices": "Devices", "schedule_notes": "Schedule notes",
+        "curiosity": "Curious about", "anything_else": "Anything else",
+    }
+    cards = []
+    for r in rows:
+        try:
+            d = json.loads(r["data_json"])
+        except (ValueError, TypeError):
+            d = {}
+        head = (f"<div class='h'><b>{_html.escape(_apply_val(d.get('name')) or 'Unnamed')}</b>"
+                f"<span>{_html.escape(_apply_val(d.get('email')))}"
+                f" &middot; {_html.escape(_apply_val(d.get('phone')))}"
+                f" &middot; {_html.escape(_apply_val(d.get('city')))}</span>"
+                f"<span class='t'>{_html.escape(fmt_ts(r['submitted_at']))}</span></div>")
+        body_rows = []
+        for fkey, lab in labels.items():
+            val = _apply_val(d.get(fkey))
+            if not val:
+                continue
+            body_rows.append(f"<tr><th>{_html.escape(lab)}</th><td>{_html.escape(val)}</td></tr>")
+        cards.append(f"<div class='card'>{head}<table>{''.join(body_rows)}</table></div>")
+    page = f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TBS Applications ({len(rows)})</title><style>
+body{{font:15px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5efe5;color:#171717}}
+.bar{{position:sticky;top:0;background:#171717;color:#fff;padding:14px 20px;display:flex;gap:14px;align-items:center}}
+.bar b{{font-size:17px}} .bar a{{margin-left:auto;background:#ddff66;color:#171717;font-weight:800;
+text-decoration:none;padding:9px 14px;border-radius:10px}}
+.wrap{{max-width:880px;margin:0 auto;padding:20px 16px 60px}}
+.card{{background:#fff;border:2px solid #171717;border-radius:16px;box-shadow:4px 4px 0 #171717;
+padding:16px 18px;margin-bottom:16px}}
+.h{{display:flex;flex-direction:column;gap:2px;border-bottom:2px solid #eee;padding-bottom:10px;margin-bottom:10px}}
+.h span{{font-size:12.5px;color:#6b645b}} .h .t{{font-size:11px;color:#9a9185}}
+table{{width:100%;border-collapse:collapse}} th{{text-align:left;width:160px;vertical-align:top;
+color:#6b645b;font-weight:700;font-size:12px;padding:5px 10px 5px 0}}
+td{{padding:5px 0;white-space:pre-wrap;word-break:break-word}}
+.empty{{text-align:center;color:#6b645b;padding:60px}}
+</style></head><body>
+<div class="bar"><b>🧠 TBS Intern Applications</b><span>{len(rows)} total</span>
+<a href="/api/applications/export?key={_html.escape(key)}">⬇ Download CSV</a></div>
+<div class="wrap">{''.join(cards) if cards else "<div class='empty'>No applications yet.</div>"}</div>
+</body></html>"""
+    return HTMLResponse(page)
 
 
 # Mount the SPA/static frontend last so /api routes win.

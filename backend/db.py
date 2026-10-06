@@ -189,6 +189,13 @@ CREATE TABLE IF NOT EXISTS blobs (
     fname TEXT PRIMARY KEY, content_type TEXT, data {BLOB}, created_at INTEGER
 );
 
+-- Intern/job application form submissions (served at /apply). A few columns are
+-- pulled out for quick scanning; the full form payload is kept in data_json.
+CREATE TABLE IF NOT EXISTS applications (
+    id TEXT PRIMARY KEY, name TEXT, email TEXT, phone TEXT, city TEXT,
+    data_json TEXT, submitted_at INTEGER
+);
+
 -- Scroll+gaze track for WEBSITE stimuli: since a cross-origin site can't be pixel-
 -- captured (esp. on mobile, no getDisplayMedia), we record the participant's scroll
 -- offset + gaze over time so the researcher can replay the scrolled view faithfully.
