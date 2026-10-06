@@ -1191,12 +1191,20 @@ def export_applications(key: str = ""):
         headers={"Content-Disposition": "attachment; filename=tbs_intern_applications.csv"})
 
 
+@app.delete("/api/applications/{aid}")
+def delete_application(aid: str, key: str = ""):
+    _apply_check_key(key)
+    with db.get_conn() as conn:
+        conn.execute("DELETE FROM applications WHERE id=?", (aid,))
+    return {"ok": True, "deleted": aid}
+
+
 @app.get("/apply/responses", response_class=HTMLResponse)
 def applications_view(key: str = ""):
     _apply_check_key(key)
     with db.get_conn() as conn:
         rows = conn.execute(
-            "SELECT data_json, submitted_at FROM applications ORDER BY submitted_at DESC"
+            "SELECT id, data_json, submitted_at FROM applications ORDER BY submitted_at DESC"
         ).fetchall()
     import html as _html
     labels = {
@@ -1218,7 +1226,9 @@ def applications_view(key: str = ""):
             d = json.loads(r["data_json"])
         except (ValueError, TypeError):
             d = {}
-        head = (f"<div class='h'><b>{_html.escape(_apply_val(d.get('name')) or 'Unnamed')}</b>"
+        head = (f"<div class='h'>"
+                f"<button class='del' data-id='{_html.escape(r['id'])}' title='Delete this application'>&times;</button>"
+                f"<b>{_html.escape(_apply_val(d.get('name')) or 'Unnamed')}</b>"
                 f"<span>{_html.escape(_apply_val(d.get('email')))}"
                 f" &middot; {_html.escape(_apply_val(d.get('phone')))}"
                 f" &middot; {_html.escape(_apply_val(d.get('city')))}</span>"
@@ -1240,8 +1250,11 @@ text-decoration:none;padding:9px 14px;border-radius:10px}}
 .wrap{{max-width:880px;margin:0 auto;padding:20px 16px 60px}}
 .card{{background:#fff;border:2px solid #171717;border-radius:16px;box-shadow:4px 4px 0 #171717;
 padding:16px 18px;margin-bottom:16px}}
-.h{{display:flex;flex-direction:column;gap:2px;border-bottom:2px solid #eee;padding-bottom:10px;margin-bottom:10px}}
+.h{{display:flex;flex-direction:column;gap:2px;border-bottom:2px solid #eee;padding-bottom:10px;margin-bottom:10px;position:relative}}
 .h span{{font-size:12.5px;color:#6b645b}} .h .t{{font-size:11px;color:#9a9185}}
+.del{{position:absolute;top:-2px;right:0;border:1.6px solid #171717;background:#fff;border-radius:8px;
+width:26px;height:26px;font-size:16px;font-weight:800;line-height:1;cursor:pointer}}
+.del:hover{{background:#ffbac8}}
 table{{width:100%;border-collapse:collapse}} th{{text-align:left;width:160px;vertical-align:top;
 color:#6b645b;font-weight:700;font-size:12px;padding:5px 10px 5px 0}}
 td{{padding:5px 0;white-space:pre-wrap;word-break:break-word}}
@@ -1250,6 +1263,17 @@ td{{padding:5px 0;white-space:pre-wrap;word-break:break-word}}
 <div class="bar"><b>🧠 TBS Intern Applications</b><span>{len(rows)} total</span>
 <a href="/api/applications/export?key={_html.escape(key)}">⬇ Download CSV</a></div>
 <div class="wrap">{''.join(cards) if cards else "<div class='empty'>No applications yet.</div>"}</div>
+<script>
+var KEY={json.dumps(key)};
+document.querySelectorAll('.del').forEach(function(b){{
+  b.onclick=function(){{
+    if(!confirm('Delete this application permanently?'))return;
+    fetch('/api/applications/'+b.dataset.id+'?key='+encodeURIComponent(KEY),{{method:'DELETE'}})
+      .then(function(r){{ if(r.ok) b.closest('.card').remove(); else alert('Delete failed.'); }})
+      .catch(function(){{ alert('Delete failed.'); }});
+  }};
+}});
+</script>
 </body></html>"""
     return HTMLResponse(page)
 
