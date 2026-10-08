@@ -19,7 +19,7 @@
 </head>
 <body>
 <div class="top"><div class="brand"><span>◉</span>THE BRAIN STORY</div><div class="ps"><div id="pb" class="pb"></div></div><div id="ctr" class="ctr">Start</div></div>
-<div class="wrap"><form id="f">
+<div class="wrap"><form id="f" novalidate>
 
 <section class="screen active">
 <div class="hero">
@@ -145,10 +145,11 @@ const SUBMIT_ENDPOINT="/api/applications";
 const f=document.getElementById("f"),S=[...document.querySelectorAll(".screen")],pb=document.getElementById("pb"),ctr=document.getElementById("ctr");let c=0;
 function show(n){c=n;S.forEach((s,i)=>s.classList.toggle("active",i===n));pb.style.width=(n===0?0:Math.min(100,n/7*100))+"%";ctr.textContent=n===0?"Start":(n===8?"Done":n+" / 7");scrollTo(0,0)}
 function valid(){for(const e of S[c].querySelectorAll("[required]")){if(e.type==="radio"){if(!S[c].querySelector('input[name="'+e.name+'"]:checked'))return false}else if(!e.value.trim())return false}return true}
+function firstInvalidScreen(){for(let i=0;i<S.length;i++){for(const e of S[i].querySelectorAll("[required]")){if(e.type==="radio"){if(!S[i].querySelector('input[name="'+e.name+'"]:checked'))return i}else if(!e.value.trim())return i}}return -1}
 document.querySelectorAll(".next").forEach(b=>b.onclick=()=>valid()?show(Math.min(c+1,7)):alert("A couple of required questions are still empty."));
 document.querySelectorAll(".prev").forEach(b=>b.onclick=()=>show(Math.max(c-1,0)));
 function obj(){const d=new FormData(f),o={};for(const[k,v]of d.entries()){if(o[k]){if(!Array.isArray(o[k]))o[k]=[o[k]];o[k].push(v)}else o[k]=v}o.submitted_at=new Date().toISOString();return o}
 function backup(o){const n=(o.name||"applicant").replace(/[^a-z0-9]+/gi,"_");const b=new Blob([JSON.stringify(o,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="TBS_Intern_Application_"+n+".json";a.click()}
-f.onsubmit=async e=>{e.preventDefault();if(!valid())return;const o=obj();try{if(SUBMIT_ENDPOINT){const r=await fetch(SUBMIT_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});if(!r.ok)throw Error()}else backup(o);show(8)}catch(x){backup(o);alert("Online submission failed, so a backup file was downloaded.");show(8)}}
+f.onsubmit=async e=>{e.preventDefault();const bad=firstInvalidScreen();if(bad>=0){show(bad);alert("A couple of required questions are still empty.");return}const o=obj();try{if(SUBMIT_ENDPOINT){const r=await fetch(SUBMIT_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});if(!r.ok)throw Error()}else backup(o);show(8)}catch(x){backup(o);alert("Online submission failed, so a backup file was downloaded.");show(8)}}
 </script>
 </body></html>
