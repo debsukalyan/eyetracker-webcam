@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta property="og:title" content="The Neuroscience Roadmap">
+<meta property="og:description" content="Every degree, every exam, every step into neuroscience. By @chintaa_money.">
+<title>The Neuroscience Roadmap</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* Layout: one long road down the page; each stop on the carousel's road is a section, the degree picker is the first stop. Single dark look = @chintaa_money carousel brand. */
+:root{
+  --bg:#23272C; --panel:#2B3036; --line:#3A4048;
+  --fg:#F4F1EA; --dim:#C9C3B8; --tan:#A38F72;
+  --or:#F9B653; --ink:#23272C;
+  --hand:'Patrick Hand','Comic Sans MS','Segoe Print',cursive;
+  --text:'Atkinson Hyperlegible',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--text);font-size:17px;line-height:1.6;margin:0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
+.wrap{max-width:860px;margin:0 auto}
+a{color:var(--or);text-underline-offset:3px}
+a:focus-visible,button:focus-visible,label:focus-within{outline:3px solid var(--or);outline-offset:3px;border-radius:8px}
+h1,h2,h3,.hand{font-family:var(--hand);font-weight:400;letter-spacing:.02em;text-wrap:balance}
+h1{font-size:clamp(46px,9vw,78px);line-height:.98;color:var(--or);margin:14px 0 10px}
+h2{font-size:clamp(34px,6vw,48px);line-height:1.05;color:var(--or);margin:0 0 6px}
+h3{font-size:27px;line-height:1.1;margin:0 0 4px;color:var(--fg)}
+p{margin:0 0 12px;max-width:65ch}
+.pill{display:inline-block;font-family:var(--hand);font-size:20px;letter-spacing:.18em;border:2px solid var(--tan);border-radius:12px;padding:3px 14px;color:var(--fg)}
+.lede{font-size:19px;color:var(--dim);max-width:58ch}
+.by{font-family:var(--hand);font-size:22px;color:var(--dim);margin-top:14px}
+.by b{color:var(--fg);font-weight:400}
+
+header{padding-block:44px 8px}
+/* road nav */
+.roadnav{margin:26px 0 8px;overflow-x:auto}
+.roadnav svg{display:block;width:100%;min-width:560px;height:auto;font-family:var(--hand)}
+.roadnav a text{fill:var(--fg);transition:fill .15s}
+.roadnav a:hover text,.roadnav a:focus text{fill:var(--or)}
+.roadnav a:hover circle.stop{fill:var(--or)}
+
+section.stop{padding-block:46px 8px;border-top:2px dashed var(--line);margin-top:34px}
+.stopno{font-family:var(--hand);color:var(--tan);font-size:22px;letter-spacing:.12em}
+.why{color:var(--dim);font-size:18px}
+
+/* degree picker */
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 22px}
+.chip{font-family:var(--hand);font-size:22px;line-height:1.1;color:var(--fg);background:transparent;border:2px solid var(--dim);border-radius:40px;padding:8px 18px;cursor:pointer}
+.chip:hover{border-color:var(--or)}
+.chip[aria-pressed="true"]{background:var(--or);border-color:var(--or);color:var(--ink)}
+.route{background:var(--panel);border:2px solid var(--line);border-radius:28px;padding:26px clamp(18px,4vw,34px)}
+.route-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 20px;align-items:flex-end;margin-bottom:16px}
+.route-head h3{font-size:clamp(30px,5vw,40px);color:var(--or)}
+.route-head .sub{color:var(--dim);font-size:16px}
+.meter{display:flex;align-items:center;gap:10px;font-family:var(--hand);font-size:22px}
+.dots{display:flex;gap:6px}
+.dots i{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--or);display:block}
+.dots i.on{background:var(--or)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 28px}
+.blk{border-left:4px solid var(--or);padding-left:16px;min-width:0}
+.blk b{display:block;font-family:var(--hand);font-weight:400;color:var(--or);font-size:21px;letter-spacing:.08em}
+.blk ul{margin:2px 0 0;padding-left:18px}
+.blk li{margin:2px 0}
+.first{margin-top:22px;background:var(--bg);border:2px dashed var(--or);border-radius:20px;padding:16px 20px}
+.first b{font-family:var(--hand);font-weight:400;color:var(--or);font-size:22px;display:block}
+.quote{font-family:var(--hand);font-size:22px;color:var(--dim);margin-top:14px}
+
+/* exams */
+.tablewrap{overflow-x:auto;margin-top:16px;border:2px solid var(--line);border-radius:20px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:16px}
+th,td{text-align:left;padding:12px 16px;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-family:var(--hand);font-weight:400;font-size:20px;color:var(--or);letter-spacing:.06em;background:var(--panel)}
+td:first-child{font-weight:700;white-space:nowrap}
+.note{font-size:15px;color:var(--dim);margin-top:10px}
+
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:16px}
+.card{background:var(--panel);border-radius:20px;padding:16px 18px;min-width:0}
+.card h3{font-size:24px;color:var(--or)}
+.card p{font-size:16px;margin:0;color:var(--fg)}
+.card .k{font-size:14px;color:var(--dim);margin-top:6px}
+
+/* email */
+.email{position:relative;background:var(--panel);border:2px solid var(--line);border-radius:20px;padding:18px 20px;margin-top:16px}
+.email pre{margin:0;white-space:pre-wrap;font-family:var(--text);font-size:16px;line-height:1.55;color:var(--fg)}
+.email .ph{color:var(--or)}
+.copy{font-family:var(--hand);font-size:20px;background:var(--or);color:var(--ink);border:0;border-radius:30px;padding:6px 18px;cursor:pointer;margin-top:12px}
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 20px;margin-top:14px;padding:0;list-style:none}
+.rules li{padding-left:28px;position:relative;font-size:16px}
+.rules li::before{content:"✓";position:absolute;left:4px;color:var(--or);font-weight:700}
+
+/* checklist */
+.check{list-style:none;padding:0;margin:16px 0 0;display:grid;gap:10px}
+.check label{display:flex;gap:14px;align-items:flex-start;background:var(--panel);border-radius:16px;padding:12px 16px;cursor:pointer}
+.check input{appearance:none;flex:none;width:26px;height:26px;border:2.5px solid var(--or);border-radius:8px;margin:1px 0 0;display:grid;place-content:center;cursor:pointer}
+.check input:checked{background:var(--or)}
+.check input:checked::after{content:"✓";color:var(--ink);font-weight:700;font-size:17px}
+.check input:checked + span{color:var(--dim);text-decoration:line-through}
+.progress{font-family:var(--hand);font-size:22px;color:var(--dim);margin-top:10px}
+
+footer{margin-top:54px;padding-top:24px;border-top:2px dashed var(--line);color:var(--dim);font-size:15px}
+footer .hand{font-size:26px;color:var(--fg)}
+
+@media (max-width:620px){
+  .grid{grid-template-columns:minmax(0,1fr)}
+  body{font-size:16px}
+  table{min-width:0}
+  thead{display:none}
+  tr{display:block;padding:12px 16px;border-bottom:1px solid var(--line)}
+  tr:last-child{border-bottom:0}
+  td{display:block;border:0;padding:1px 0}
+  td:first-child{white-space:normal;color:var(--or);font-size:17px}
+  td:nth-child(2){color:var(--dim);font-size:14px}
+  td:nth-child(2)::before{content:"Take it after: "}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header>
+  <span class="pill">START HERE</span>
+  <h1>The Neuroscience Roadmap</h1>
+  <p class="lede">Every degree, every exam, every step, from where you are now to working as a neuroscientist. Pick your degree, follow the road, tick things off as you go.</p>
+  <div class="by">by <b>@chintaa_money</b> · PhD researcher, Centre for Neuroscience, IISc</div>
+
+  <nav class="roadnav" aria-label="Roadmap stops">
+    <svg viewBox="-30 0 930 200" role="img" aria-label="Road with five stops: your degree, right exam, first lab, MSc or PhD, neuroscientist">
+      <path d="M80 125 C150 125 187 60 257 60 C327 60 365 125 435 125 C505 125 542 60 612 60 C682 60 720 125 790 125" fill="none" stroke="#A38F72" stroke-opacity=".45" stroke-width="22" stroke-linecap="round"/>
+      <path d="M80 125 C150 125 187 60 257 60 C327 60 365 125 435 125 C505 125 542 60 612 60 C682 60 720 125 790 125" fill="none" stroke="#F4F1EA" stroke-width="3" stroke-dasharray="14 12"/>
+      <a href="#degree"><circle class="stop" cx="80" cy="125" r="15" fill="#23272C" stroke="#F9B653" stroke-width="4"/><text x="80" y="178" text-anchor="middle" font-size="30">1 · Your degree</text></a>
+      <a href="#exams"><circle class="stop" cx="257" cy="60" r="15" fill="#23272C" stroke="#F9B653" stroke-width="4"/><text x="257" y="28" text-anchor="middle" font-size="30">2 · Right exam</text></a>
+      <a href="#lab"><circle class="stop" cx="435" cy="125" r="15" fill="#23272C" stroke="#F9B653" stroke-width="4"/><text x="435" y="178" text-anchor="middle" font-size="30">3 · First lab</text></a>
+      <a href="#phd"><circle class="stop" cx="612" cy="60" r="15" fill="#23272C" stroke="#F9B653" stroke-width="4"/><text x="612" y="28" text-anchor="middle" font-size="30">4 · MSc / PhD</text></a>
+      <a href="#careers"><circle cx="790" cy="125" r="20" fill="#F9B653"/><path d="M790 125 V82 M790 82 L823 92 L790 103" fill="#F9B653" stroke="#F9B653" stroke-width="4" stroke-linejoin="round"/><text x="790" y="180" text-anchor="middle" font-size="32" fill="#F9B653" style="fill:#F9B653">5 · Neuroscientist</text></a>
+    </svg>
+  </nav>
+</header>
+
+<section class="stop" id="degree" aria-labelledby="h-degree">
+  <div class="stopno">STOP 1</div>
+  <h2 id="h-degree">Start from your degree</h2>
+  <p class="why">Distance is not ability. It only tells you how much new ground to cover before you apply. Tap yours.</p>
+  <div class="chips" role="group" aria-label="Choose your degree" id="chips"></div>
+  <div class="route" id="route" aria-live="polite"></div>
+</section>
+
+<section class="stop" id="exams" aria-labelledby="h-exams">
+  <div class="stopno">STOP 2</div>
+  <h2 id="h-exams">Pick the right exam</h2>
+  <p class="why">Exams decide which door you use, not where you end up. Most people need only one or two of these.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Exam</th><th>Take it after</th><th>What it opens</th></tr></thead>
+      <tbody>
+        <tr><td>IISER Aptitude Test (IAT)</td><td>Class 12</td><td>5-year BS-MS at the IISERs, where you can do neuroscience research early.</td></tr>
+        <tr><td>IISc BS (Research)</td><td>Class 12</td><td>4-year research degree at IISc. Admission is through national entrance ranks; check IISc's UG page each year.</td></tr>
+        <tr><td>IIT JAM</td><td>BSc</td><td>MSc at IITs, and the IISc Integrated PhD in Biology (accepts JAM BT, CY, MA and PH).</td></tr>
+        <tr><td>GATE</td><td>BE / BTech / MSc</td><td>MTech and PhD. IISc's Centre for Neuroscience lists GATE cut-offs across papers. Relevant papers include XL, BT, XH-C5 (Psychology), CS, EC, EE, IN, BM, DA.</td></tr>
+        <tr><td>CSIR-NET (JRF)</td><td>MSc</td><td>A funded PhD fellowship, accepted across most research institutes.</td></tr>
+        <tr><td>JEST</td><td>MSc / BSc (Physics)</td><td>PhD and integrated PhD at physics and theory institutes; also listed by IISc Neuroscience.</td></tr>
+        <tr><td>GPAT</td><td>B.Pharm</td><td>M.Pharm (Pharmacology), and listed by IISc Neuroscience for PhD.</td></tr>
+        <tr><td>CogJET</td><td>Any degree (check each programme)</td><td>MSc / PhD in Cognitive Science at participating institutes.</td></tr>
+        <tr><td>TIFR GS (Biology)</td><td>BSc / MSc</td><td>PhD and integrated PhD at TIFR and its biology centres.</td></tr>
+        <tr><td>UGC-NET</td><td>MA / MSc</td><td>PhD eligibility (and fellowship with JRF) in psychology and humanities.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Also accepted at many institutes as fellowships: DBT-JRF, ICMR-JRF and DST INSPIRE. Eligibility and accepted exams change every year, so confirm on the institute's own admissions page before you apply. Start with <a href="https://www.iisc.ac.in/admissions/ph-d-integratedprogrammes/" target="_blank" rel="noopener">IISc admissions</a>, <a href="https://gate2026.iitg.ac.in" target="_blank" rel="noopener">GATE 2026</a> and <a href="https://cogjet.iitk.ac.in" target="_blank" rel="noopener">CogJET</a>.</p>
+</section>
+
+<section class="stop" id="lab" aria-labelledby="h-lab">
+  <div class="stopno">STOP 3</div>
+  <h2 id="h-lab">Get into your first lab</h2>
+  <p class="why">Every route needs the same three things: one proof project, some real lab exposure, and one good email to the right lab.</p>
+
+  <h3 style="margin-top:22px">Lab exposure you can apply for</h3>
+  <div class="cards">
+    <div class="card"><h3>IASc–INSA–NASI Summer Fellowship</h3><p>Eight weeks in a research lab for UG and PG students across India.</p><div class="k">Applications usually open around the start of the year.</div></div>
+    <div class="card"><h3>TIFR VSRP</h3><p>TIFR's Visiting Students' Research Programme, a summer project in a TIFR lab.</p><div class="k">Good for biology, physics and maths students.</div></div>
+    <div class="card"><h3>Institute summer internships</h3><p>Most IISc, IISER, NCBS and NBRC labs take summer interns when you email the PI directly.</p><div class="k">Use the email template below.</div></div>
+    <div class="card"><h3>Neuromatch Academy</h3><p>Online computational neuroscience school with group projects. Free course material at <a href="https://neuromatch.io" target="_blank" rel="noopener">neuromatch.io</a>.</p><div class="k">The fastest bridge for engineers and physicists.</div></div>
+  </div>
+
+  <h3 style="margin-top:28px">Build one proof project (no lab needed)</h3>
+  <div class="cards">
+    <div class="card"><h3>EEG</h3><p>Load the sample data in <a href="https://mne.tools" target="_blank" rel="noopener">MNE-Python</a>, find the brain's response to a sound or image, and plot it.</p></div>
+    <div class="card"><h3>fMRI</h3><p>Pick a dataset on <a href="https://openneuro.org" target="_blank" rel="noopener">OpenNeuro</a> and reproduce one figure from its paper.</p></div>
+    <div class="card"><h3>Neurons</h3><p>Use the <a href="https://portal.brain-map.org" target="_blank" rel="noopener">Allen Brain Map</a> data to compare how neurons in two brain areas fire.</p></div>
+    <div class="card"><h3>Behaviour</h3><p>Run a reaction-time or memory experiment on 20 friends and analyse it in Python or R.</p></div>
+  </div>
+  <p class="note">Put it on GitHub with a one-page write-up. One finished project beats five certificates.</p>
+
+  <h3 style="margin-top:28px">The email to a lab</h3>
+  <p class="why">Short, specific, and proof that you read their work. Replace the orange parts.</p>
+  <div class="email">
+<pre id="emailText">Subject: <span class="ph">[Your degree]</span> student interested in <span class="ph">[their topic]</span> in your lab
+
+Dear Prof. <span class="ph">[Name]</span>,
+
+I am a <span class="ph">[year, degree]</span> student at <span class="ph">[college]</span>. I read your paper on <span class="ph">[topic, year]</span>, and the part about <span class="ph">[one specific finding]</span> made me want to learn how you <span class="ph">[method they used]</span>.
+
+I recently <span class="ph">[your proof project, one line]</span> (<span class="ph">[GitHub link]</span>). I would like to work in your lab as a <span class="ph">[summer intern / project student]</span> from <span class="ph">[month]</span> to <span class="ph">[month]</span>.
+
+I have attached my CV. Thank you for your time.
+
+<span class="ph">[Your name]</span></pre>
+    <button class="copy" id="copyBtn" type="button">Copy email</button>
+  </div>
+  <ul class="rules">
+    <li>Under 150 words</li>
+    <li>One paper, one specific detail</li>
+    <li>One link to your project</li>
+    <li>No reply in 10 days? Follow up once</li>
+  </ul>
+</section>
+
+<section class="stop" id="phd" aria-labelledby="h-phd">
+  <div class="stopno">STOP 4</div>
+  <h2 id="h-phd">MSc, Integrated PhD or PhD</h2>
+  <p class="why">After BSc you can go straight into an Integrated PhD. After MSc, BE or BTech you apply for a PhD. Most PhDs in India come with a monthly fellowship.</p>
+  <h3 style="margin-top:22px">Where neuroscience happens in India</h3>
+  <p class="note" style="margin-top:0">A starting list, not a ranking. Read the faculty pages and shortlist labs, not just institutes.</p>
+  <div class="cards">
+    <div class="card"><h3>IISc, Bengaluru</h3><p>Centre for Neuroscience: cognitive, systems, computational, molecular.</p></div>
+    <div class="card"><h3>NBRC, Manesar</h3><p>National Brain Research Centre, India's dedicated brain research institute.</p></div>
+    <div class="card"><h3>NCBS, Bengaluru</h3><p>Neurobiology, behaviour, circuits.</p></div>
+    <div class="card"><h3>TIFR, Mumbai</h3><p>Neuroscience within its biological sciences.</p></div>
+    <div class="card"><h3>IISERs</h3><p>Pune and others have neuroscience and behaviour labs.</p></div>
+    <div class="card"><h3>Cognitive Science</h3><p>IIT Kanpur, IIIT Hyderabad and CBCS Allahabad.</p></div>
+    <div class="card"><h3>NIMHANS, Bengaluru</h3><p>Clinical neuroscience, neurophysiology, psychiatry research.</p></div>
+  </div>
+</section>
+
+<section class="stop" id="careers" aria-labelledby="h-careers">
+  <div class="stopno">STOP 5</div>
+  <h2 id="h-careers">Where a neuroscientist works</h2>
+  <p class="why">"Will I get a job?" is the second most common question in my comments. A PhD is not the only exit, and academia is not the only job.</p>
+  <div class="cards">
+    <div class="card"><h3>Academia</h3><p>Postdoc, then faculty. Run your own lab, teach, publish.</p></div>
+    <div class="card"><h3>Neurotech & BCI</h3><p>EEG headsets, brain-computer interfaces, neurostimulation startups.</p></div>
+    <div class="card"><h3>Data science & AI</h3><p>Neural-data skills (signals, stats, ML) transfer straight to tech.</p></div>
+    <div class="card"><h3>Pharma & clinical research</h3><p>Drug discovery for brain disorders, clinical trials, medical affairs.</p></div>
+    <div class="card"><h3>Consumer & UX research</h3><p>Neuromarketing, behavioural science and product research teams.</p></div>
+    <div class="card"><h3>Science communication & policy</h3><p>Writing, content, science journalism, research funding and policy.</p></div>
+    <div class="card"><h3>Clinical neuropsychology</h3><p>Assessing and treating patients. In India this needs RCI-recognised clinical training.</p></div>
+  </div>
+</section>
+
+<section class="stop" id="moves" aria-labelledby="h-moves">
+  <div class="stopno">YOUR MOVES</div>
+  <h2 id="h-moves">Your next five moves</h2>
+  <p class="why">Tick them off. This page remembers them on your phone.</p>
+  <ul class="check" id="check"></ul>
+  <div class="progress" id="progress"></div>
+</section>
+
+<footer>
+  <div class="hand">Made by @chintaa_money</div>
+  <p>I did UG in Microbiology, cleared IIT JAM, and joined the Integrated PhD at IISc. Your route will look different, but there is one. Send this page to the friend who keeps asking "can I do neuroscience?"</p>
+  <p>Updated November 2026. Exams and eligibility change every year; always confirm on the official admissions page.</p>
+</footer>
+</div>
+
+<script>
+const D=[
+ {id:'school',chip:'Class 11–12',name:'Still in school',sub:'Class 11 or 12, any stream',d:0,dist:'Before the road',
+  edge:'You get to choose the degree that makes the road shortest.',
+  tracks:['Whatever you would study even without the marks'],
+  doors:['PCB: BSc / BS-MS in biology or psychology. Look at IISER BS-MS (IAT) and IISc BS (Research).','PCM: BTech (CS, ECE, Biomedical) or BSc Physics / Maths, then enter through computation.','Arts / Commerce: BA / BSc Psychology, or Economics with statistics.'],
+  add:'Basic coding and a habit of reading one science article a week',
+  first:'Shortlist three undergraduate programmes and note their entrance exam and deadline.'},
+ {id:'biology',chip:'Biology / Biotech',name:'Biology / Biotech',sub:'Life sciences · Zoology · Microbiology · Biochem',d:1,dist:'At the door',
+  edge:'You already think in cells, genes and lab protocols.',
+  tracks:['Molecular','Cellular','Systems','Behaviour'],
+  doors:['After BSc: IIT JAM (BT) → IISc Integrated PhD, or TIFR GS Biology','After MSc: CSIR-NET, GATE XL / BT → PhD'],
+  add:'Python and basic statistics',
+  first:'Learn Python basics and redo one analysis from a published neuroscience paper.',
+  quote:'This was me: UG Microbiology → IIT JAM → IISc.'},
+ {id:'psychology',chip:'Psychology',name:'Psychology',sub:'BA · BSc · MA Psychology',d:1,dist:'At the door',
+  edge:'You know how to run experiments on behaviour.',
+  tracks:['Cognitive','Clinical / neuropsychology','Social'],
+  doors:['CogJET → MSc / PhD in Cognitive Science','GATE XH-C5 (Psychology) or UGC-NET → PhD'],
+  add:'Coding (Python or R) and one neurobiology course',
+  first:'Run one small online behaviour experiment and analyse it in Python or R.',
+  quote:'Cognitive neuroscience = psychology + a brain scanner.'},
+ {id:'engineering',chip:'Engineering / CS',name:'Engineering / CS',sub:'CS · ECE · EEE · Instrumentation · Biomedical',d:2,dist:'1 bridge away',
+  edge:'Code, maths, signals, hardware. Most labs are short of all four.',
+  tracks:['Computational','Neuroengineering / BCI','Imaging analysis'],
+  doors:['GATE (CS, EC, EE, IN, BM, DA) → MTech / PhD','Research assistant roles in neurotech labs and startups'],
+  add:'Neuroscience basics (Neuromatch Academy material is free)',
+  first:'Build one EEG project with MNE-Python and put it on GitHub.',
+  quote:'Brains run on signals. You already speak signals.'},
+ {id:'physics',chip:'Physics / Maths / Stats',name:'Physics / Maths / Stats',sub:'Physics · Mathematics · Statistics',d:2,dist:'1 bridge away',
+  edge:'You can model what others can only describe.',
+  tracks:['Theoretical','Computational','MRI physics','Neural data'],
+  doors:['After BSc: IIT JAM (PH / MA) → Integrated PhD','After MSc: JEST, GATE (PH / MA / ST), CSIR-NET → PhD'],
+  add:'Python and one neuroscience course',
+  first:'Code a simple integrate-and-fire neuron and compare it with real spike data.',
+  quote:'John Hopfield started in physics. So can you.'},
+ {id:'chemistry',chip:'Chemistry / Pharmacy',name:'Chemistry / Pharmacy',sub:'BSc / MSc Chemistry · B.Pharm · M.Pharm',d:3,dist:'2 bridges away',
+  edge:'Every brain signal is chemistry: receptors, drugs, transmitters.',
+  tracks:['Neuropharmacology','Molecular','Drugs for brain disorders'],
+  doors:['Pharmacy: GPAT → M.Pharm (Pharmacology) or PhD','Chemistry: IIT JAM (CY) → Integrated PhD; CSIR-NET, GATE CY → PhD'],
+  add:'Cell biology, behaviour experiments and statistics',
+  first:'Read one review on a neurotransmitter system and email one neuropharmacology lab.',
+  quote:'Your degree already knows what dopamine is made of.'},
+ {id:'medicine',chip:'MBBS / Nursing / Allied',name:'Medicine & allied',sub:'MBBS · BDS · Nursing · Physio · AYUSH',d:2,dist:'MBBS 1 bridge · allied 2',
+  edge:'You have seen real patients. Labs need people who can ask clinical questions.',
+  tracks:['Clinical','Translational','Neuropsychology','Rehabilitation'],
+  doors:['PhD at medical and research institutes (eligibility varies by degree)','Research roles in neurology and psychiatry departments'],
+  add:'Research methods, statistics and one small project',
+  first:'Ask a neurology or psychiatry department if you can help with an ongoing study, even with the data.',
+  quote:'The clinic asks the questions. The lab answers them.'},
+ {id:'commerce',chip:'Commerce / Econ / Arts',name:'Commerce / Economics / Arts',sub:'B.Com · Economics · BBA · Humanities',d:4,dist:'Longest road (still a road)',
+  edge:'You study decisions, money and persuasion. So does the brain.',
+  tracks:['Decision neuroscience','Neuroeconomics','Consumer neuroscience'],
+  doors:['MA / MSc Psychology or Cognitive Science (check each programme\'s eligibility)','Behavioural-science roles in industry'],
+  add:'Statistics, psychology basics and Python',
+  first:'Take one statistics course and one intro psychology course this semester.',
+  quote:'Neuroeconomics exists because economists got curious.'}
+];
+const chips=document.getElementById('chips'),route=document.getElementById('route');
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function show(id,scroll){
+  const g=D.find(x=>x.id===id)||D[1];
+  chips.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.id===g.id));
+  const dots=[1,2,3,4].map(i=>`<i class="${i<=g.d?'on':''}"></i>`).join('');
+  route.innerHTML=`<div class="route-head"><div><h3>${esc(g.name)}</h3><div class="sub">${esc(g.sub)}</div></div>
+   <div class="meter"><span class="dots" aria-hidden="true">${dots}</span>${esc(g.dist)}</div></div>
+   <div class="grid">
+    <div class="blk"><b>YOUR EDGE</b>${esc(g.edge)}</div>
+    <div class="blk"><b>TRACKS THAT FIT</b>${g.tracks.map(esc).join(' · ')}</div>
+    <div class="blk"><b>YOUR DOORS IN</b><ul>${g.doors.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+    <div class="blk"><b>ADD THIS</b>${esc(g.add)}</div>
+   </div>
+   <div class="first"><b>Do this month</b>${esc(g.first)}</div>
+   ${g.quote?`<div class="quote">${esc(g.quote)}</div>`:''}`;
+  try{localStorage.setItem('nr-degree',g.id)}catch(e){}
+  buildChecklist(g);
+  if(scroll) document.getElementById('degree').scrollIntoView();
+}
+D.forEach(g=>{const b=document.createElement('button');b.type='button';b.className='chip';b.dataset.id=g.id;b.textContent=g.chip;
+  b.addEventListener('click',()=>{show(g.id);try{history.replaceState(null,'','#'+g.id)}catch(e){}});chips.appendChild(b)});
+
+function buildChecklist(g){
+  const items=[
+    ['first','Do this month: '+g.first],
+    ['exam','Pick your exam from Stop 2 and write its form deadline in your calendar.'],
+    ['project','Finish one proof project and put it on GitHub.'],
+    ['labs','Shortlist five labs whose papers you actually enjoyed reading.'],
+    ['email','Send the lab email to your top two labs.']
+  ];
+  let saved={};try{saved=JSON.parse(localStorage.getItem('nr-check')||'{}')}catch(e){}
+  const ul=document.getElementById('check');
+  ul.innerHTML=items.map(([k,t])=>`<li><label><input type="checkbox" id="chk-${k}" data-k="${k}" ${saved[k]?'checked':''}><span>${esc(t)}</span></label></li>`).join('');
+  const upd=()=>{const n=ul.querySelectorAll('input:checked').length;document.getElementById('progress').textContent=n===5?'All five done. You are on the road.':`${n} of 5 done`};
+  ul.querySelectorAll('input').forEach(i=>i.addEventListener('change',()=>{saved[i.dataset.k]=i.checked;try{localStorage.setItem('nr-check',JSON.stringify(saved))}catch(e){}upd()}));
+  upd();
+}
+
+function fromHash(){const h=location.hash.slice(1);if(D.some(x=>x.id===h)){show(h,true);return true}return false}
+window.addEventListener('hashchange',fromHash);
+if(!fromHash()){let s=null;try{s=localStorage.getItem('nr-degree')}catch(e){}show(s||'biology')}
+
+document.getElementById('copyBtn').addEventListener('click',async e=>{
+  const t=document.getElementById('emailText').innerText,b=e.currentTarget;
+  try{await navigator.clipboard.writeText(t);b.textContent='Copied'}
+  catch(err){const r=document.createRange();r.selectNodeContents(document.getElementById('emailText'));const s=getSelection();s.removeAllRanges();s.addRange(r);b.textContent='Selected, press copy'}
+  setTimeout(()=>b.textContent='Copy email',2200);
+});
+</script>
+</body></html>

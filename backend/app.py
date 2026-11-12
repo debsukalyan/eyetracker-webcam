@@ -1147,6 +1147,12 @@ def _apply_val(v):
     return "" if v is None else str(v)
 
 
+@app.get("/roadmap")
+def roadmap_page():
+    """Public neuroscience roadmap page (linked from @chintaa_money's LINK DM)."""
+    return FileResponse(os.path.join(FRONTEND, "roadmap.html"))
+
+
 @app.get("/apply")
 def apply_form():
     return FileResponse(os.path.join(FRONTEND, "apply.html"))
